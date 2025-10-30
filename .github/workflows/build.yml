@@ -3,8 +3,9 @@ name: Build
 on:
   push:
     branches: ['**']
-  release:
-    types: [published]
+    tags:
+      - 'python-*'
+      - 'typescript-*'
 
 jobs:
   python:
@@ -88,7 +89,7 @@ jobs:
         if: false  # Skip until tests are implemented
 
   release-python:
-    if: github.event_name == 'release'
+    if: startsWith(github.ref, 'refs/tags/python-')
     needs: python
     runs-on: ubuntu-latest
     permissions:
@@ -128,7 +129,7 @@ jobs:
           packages-dir: python/dist/
 
   release-typescript:
-    if: github.event_name == 'release'
+    if: startsWith(github.ref, 'refs/tags/typescript-')
     needs: typescript
     runs-on: ubuntu-latest
     permissions:
