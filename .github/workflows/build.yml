@@ -170,7 +170,11 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@11.5.1
+          npm --version
+
       - name: Publish to npm with OIDC
         run: |
-          npm --version
           npm publish --access public
