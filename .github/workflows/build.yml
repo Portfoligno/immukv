@@ -1,0 +1,171 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  release:
+    types: [published]
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    container:
+      image: python@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db
+      # python:3.12-slim-bullseye
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+
+      - name: Type check with mypy
+        working-directory: python
+        run: |
+          mypy src/immukv
+
+      - name: Lint with ruff
+        working-directory: python
+        run: |
+          ruff check src/immukv
+
+      - name: Format check with black
+        working-directory: python
+        run: |
+          black --check src/immukv
+
+      - name: Run tests
+        working-directory: python
+        run: |
+          pytest tests/ -v
+        if: false  # Skip until tests are implemented
+
+  typescript:
+    runs-on: ubuntu-latest
+    container:
+      image: node@sha256:d69fb189fa7765636655db043a6a9e6be5ddf94bd1a8dc33fd0bcf4664606a9e
+      # node:18-bullseye-slim
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: |
+          npm ci --omit optional
+
+      - name: Build
+        working-directory: typescript
+        run: |
+          npm run build
+
+      - name: Lint
+        working-directory: typescript
+        run: |
+          npm run lint
+
+      - name: Format check
+        working-directory: typescript
+        run: |
+          npx prettier --check "src/**/*.ts"
+
+      - name: Run tests
+        working-directory: typescript
+        run: |
+          npm test
+        if: false  # Skip until tests are implemented
+
+  release-python:
+    if: github.event_name == 'release'
+    needs: python
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    container:
+      image: python@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git jq
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify version matches tag
+        working-directory: python
+        run: |
+          pip install --no-cache-dir tomli
+          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          TAG_VERSION=${GITHUB_REF#refs/tags/python-}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Build package
+        working-directory: python
+        run: |
+          pip install --no-cache-dir build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist/
+
+  release-typescript:
+    if: github.event_name == 'release'
+    needs: typescript
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    container:
+      image: node@sha256:d69fb189fa7765636655db043a6a9e6be5ddf94bd1a8dc33fd0bcf4664606a9e
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git jq
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify version matches tag
+        working-directory: typescript
+        run: |
+          PACKAGE_VERSION=$(jq -r '.version' package.json)
+          TAG_VERSION=${GITHUB_REF#refs/tags/typescript-}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: |
+          npm ci --omit optional
+
+      - name: Build
+        working-directory: typescript
+        run: |
+          npm run build
+
+      - name: Publish to npm
+        working-directory: typescript
+        run: |
+          npm publish --provenance --access public
