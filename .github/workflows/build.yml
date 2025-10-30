@@ -4,8 +4,7 @@ on:
   push:
     branches: ['**']
     tags:
-      - 'python-*'
-      - 'typescript-*'
+      - '[0-9]*.[0-9]*.[0-9]*'
 
 jobs:
   python:
@@ -48,6 +47,32 @@ jobs:
           pytest tests/ -v
         if: false  # Skip until tests are implemented
 
+      - name: Verify version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: python
+        run: |
+          pip install --no-cache-dir tomli
+          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Build distribution packages
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: python
+        run: |
+          pip install --no-cache-dir build
+          python -m build
+
+      - name: Upload distribution artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: python/dist/
+
   typescript:
     runs-on: ubuntu-latest
     container:
@@ -88,85 +113,64 @@ jobs:
           npm test
         if: false  # Skip until tests are implemented
 
-  release-python:
-    if: startsWith(github.ref, 'refs/tags/python-')
+      - name: Verify version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: typescript
+        run: |
+          PACKAGE_VERSION=$(jq -r '.version' package.json)
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Upload distribution artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-dist
+          path: |
+            typescript/dist/
+            typescript/package.json
+            typescript/README.md
+
+  publish-python:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: python
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    container:
-      image: python@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db
     steps:
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y ca-certificates git jq
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Verify version matches tag
-        working-directory: python
-        run: |
-          pip install --no-cache-dir tomli
-          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          TAG_VERSION=${GITHUB_REF#refs/tags/python-}
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
-
-      - name: Build package
-        working-directory: python
-        run: |
-          pip install --no-cache-dir build
-          python -m build
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: python/dist/
 
-  release-typescript:
-    if: startsWith(github.ref, 'refs/tags/typescript-')
+  publish-typescript:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: typescript
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    container:
-      image: node@sha256:d69fb189fa7765636655db043a6a9e6be5ddf94bd1a8dc33fd0bcf4664606a9e
     steps:
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y ca-certificates git jq
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: typescript-dist
+          path: .
 
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
 
-      - name: Verify version matches tag
-        working-directory: typescript
+      - name: Publish to npm with OIDC
         run: |
-          PACKAGE_VERSION=$(jq -r '.version' package.json)
-          TAG_VERSION=${GITHUB_REF#refs/tags/typescript-}
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
-
-      - name: Install dependencies
-        working-directory: typescript
-        run: |
-          npm ci --omit optional
-
-      - name: Build
-        working-directory: typescript
-        run: |
-          npm run build
-
-      - name: Publish to npm
-        working-directory: typescript
-        run: |
-          npm publish --provenance --access public
+          npm publish --access public
