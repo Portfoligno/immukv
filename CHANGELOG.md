@@ -5,6 +5,25 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2025-11-06
+
+### Added
+
+- Strong type safety with branded types for version IDs, hashes, and other S3-specific values
+- Full generic type support allowing type-safe keys and values
+
+### Changed
+
+- **BREAKING**: ImmuKVClient constructor now requires a `ValueParser` parameter
+  - Python: `ImmuKVClient(config, lambda v: v)`  # identity parser for no transformation
+  - TypeScript: `new ImmuKVClient(config, v => v)`  # identity parser for no transformation
+  - This enables type-safe value parsing and custom validation of stored values
+- Improved type inference with generic K and V type parameters
+
+### Fixed
+
+- `list_keys` with `after_key` parameter now correctly excludes the specified key from results (previously included it)
+
 ## [0.1.6] - 2025-10-31
 
 ### Fixed
@@ -46,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.7]: https://github.com/Portfoligno/immukv/releases/tag/0.1.7
 [0.1.6]: https://github.com/Portfoligno/immukv/releases/tag/0.1.6
 [0.1.5]: https://github.com/Portfoligno/immukv/releases/tag/0.1.5
 [0.1.4]: https://github.com/Portfoligno/immukv/releases/tag/0.1.4
