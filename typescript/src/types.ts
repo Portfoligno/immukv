@@ -2,6 +2,33 @@
  * Type definitions for ImmuKV.
  */
 
+// Branded types parameterized by key type
+// These are branded types to prevent mixing version IDs from different contexts
+export type LogVersionId<K extends string> = string & {
+  readonly __brand: 'LogVersionId';
+  readonly __key: K;
+};
+export type KeyVersionId<K extends string> = string & {
+  readonly __brand: 'KeyVersionId';
+  readonly __key: K;
+};
+export type KeyObjectETag<K extends string> = string & {
+  readonly __brand: 'KeyObjectETag';
+  readonly __key: K;
+};
+export type Hash<K extends string> = string & {
+  readonly __brand: 'Hash';
+  readonly __key: K;
+};
+export type Sequence<K extends string> = number & {
+  readonly __brand: 'Sequence';
+  readonly __key: K;
+};
+export type TimestampMs<K extends string> = number & {
+  readonly __brand: 'TimestampMs';
+  readonly __key: K;
+};
+
 /**
  * Client configuration.
  */
@@ -29,30 +56,30 @@ export interface Entry<K extends string = string, V = any> {
   /** The value */
   value: V;
   /** Timestamp in epoch milliseconds */
-  timestampMs: number;
+  timestampMs: TimestampMs<K>;
   /** Log version ID for this entry */
-  versionId: string;
+  versionId: LogVersionId<K>;
   /** Client-maintained sequence counter */
-  sequence: number;
+  sequence: Sequence<K>;
   /** Previous log version ID */
-  previousVersionId?: string;
+  previousVersionId?: LogVersionId<K>;
   /** SHA-256 hash of this entry */
-  hash: string;
+  hash: Hash<K>;
   /** Hash from previous entry */
-  previousHash: string;
+  previousHash: Hash<K>;
   /** Previous key object ETag at log write time (for repair) */
-  previousKeyObjectEtag?: string;
+  previousKeyObjectEtag?: KeyObjectETag<K>;
 }
 
 /**
  * Type definition for log entry data used in hash calculation.
  */
 export interface LogEntryForHash<K extends string = string, V = any> {
-  sequence: number;
+  sequence: Sequence<K>;
   key: K;
   value: V;
-  timestampMs: number;
-  previousHash: string;
+  timestampMs: TimestampMs<K>;
+  previousHash: Hash<K>;
 }
 
 /**

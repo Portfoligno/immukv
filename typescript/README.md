@@ -16,7 +16,7 @@ import { ImmuKVClient, Config } from 'immukv';
 const config: Config = {
   s3Bucket: 'your-bucket',
   s3Region: 'us-east-1',
-  s3Prefix: ''
+  s3Prefix: '',
 };
 
 const client = new ImmuKVClient(config);
