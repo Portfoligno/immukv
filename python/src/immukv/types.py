@@ -1,5 +1,7 @@
 """Type definitions for ImmuKV."""
 
+import hashlib
+import time
 from dataclasses import dataclass
 from typing import Generic, Optional, TypedDict, TypeVar
 
@@ -56,6 +58,117 @@ class TimestampMs(int, Generic[K]):
     """Unix epoch timestamp in milliseconds for an entry associated with key K."""
 
     pass
+
+
+# Factory functions for branded types
+
+
+def hash_compute(data: "LogEntryForHash[K, V]") -> Hash[K]:
+    """Compute SHA-256 hash from log entry data.
+
+    Args:
+        data: Log entry data to hash (excludes version_id, log_version_id, hash)
+
+    Returns:
+        Hash in format 'sha256:<64 hex characters>'
+    """
+    # Import here to avoid circular dependency
+    from immukv.json_helpers import dumps_canonical
+
+    canonical_bytes = dumps_canonical(data)  # type: ignore[arg-type]
+    hash_bytes = hashlib.sha256(canonical_bytes).digest()
+    hash_hex = hash_bytes.hex()
+    return Hash(f"sha256:{hash_hex}")
+
+
+def hash_genesis() -> Hash[K]:
+    """Return genesis hash for the first entry in a chain.
+
+    Returns:
+        Genesis hash 'sha256:genesis'
+    """
+    return Hash("sha256:genesis")
+
+
+def hash_from_json(s: str) -> Hash[K]:
+    """Parse hash from JSON string with validation.
+
+    Args:
+        s: Hash string from JSON
+
+    Returns:
+        Validated Hash type
+
+    Raises:
+        ValueError: If hash format is invalid
+    """
+    if not s.startswith("sha256:"):
+        raise ValueError(f"Invalid hash format (must start with 'sha256:'): {s}")
+    return Hash(s)
+
+
+def sequence_initial() -> Sequence[K]:
+    """Return initial sequence number before first entry.
+
+    Returns:
+        Sequence number -1 (will become 0 on first write)
+    """
+    return Sequence(-1)
+
+
+def sequence_next(seq: Sequence[K]) -> Sequence[K]:
+    """Increment sequence number.
+
+    Args:
+        seq: Current sequence number
+
+    Returns:
+        Next sequence number (seq + 1)
+    """
+    return Sequence(seq + 1)
+
+
+def sequence_from_json(n: int) -> Sequence[K]:
+    """Parse sequence from JSON with validation.
+
+    Args:
+        n: Sequence number from JSON
+
+    Returns:
+        Validated Sequence type
+
+    Raises:
+        ValueError: If sequence is invalid (< -1)
+    """
+    if n < -1:
+        raise ValueError(f"Invalid sequence (must be >= -1): {n}")
+    return Sequence(n)
+
+
+def timestamp_now() -> TimestampMs[K]:
+    """Return current timestamp in milliseconds.
+
+    Returns:
+        Current Unix epoch time in milliseconds
+    """
+    return TimestampMs(int(time.time() * 1000))
+
+
+def timestamp_from_json(n: int) -> TimestampMs[K]:
+    """Parse timestamp from JSON with validation.
+
+    Args:
+        n: Timestamp in milliseconds from JSON
+
+    Returns:
+        Validated TimestampMs type
+
+    Raises:
+        ValueError: If timestamp is invalid (<= 0)
+    """
+    if n <= 0:
+        raise ValueError(f"Invalid timestamp (must be > 0): {n}")
+    return TimestampMs(n)
 
 
 @dataclass

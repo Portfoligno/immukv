@@ -5,7 +5,17 @@ allowing the main client code to work with Any-free types.
 """
 
 import json
-from typing import Any, Dict, List, Optional, TypedDict, TypeVar, Union, cast
+from typing import Any, Dict, List, Literal, Optional, TypedDict, TypeVar, Union, cast
+
+from mypy_boto3_s3.client import S3Client
+from mypy_boto3_s3.paginator import ListObjectsV2Paginator
+from mypy_boto3_s3.type_defs import (
+    GetObjectRequestTypeDef,
+    ListObjectVersionsRequestTypeDef,
+    PutObjectRequestTypeDef,
+)
+
+from immukv.types import KeyObjectETag, KeyVersionId, LogVersionId
 
 # Import K and V type variables to match client
 K = TypeVar("K", bound=str)
@@ -101,77 +111,79 @@ class TypedS3Client:
     (disallow_any_expr) while working with boto3.
     """
 
-    def __init__(self, s3_client: Any) -> None:  # type: ignore[misc,explicit-any]
+    def __init__(self, s3_client: S3Client) -> None:
         """Initialize with a boto3 S3 client."""
-        self._s3 = s3_client  # type: ignore[misc]
+        self._s3 = s3_client
 
     def get_object(
         self,
-        Bucket: str,
-        Key: str,
-        VersionId: Optional[str] = None,
+        bucket: str,
+        key: str,
+        version_id: Optional[str] = None,
     ) -> S3GetObjectResponse:
         """Get object from S3."""
-        kwargs: Dict[str, Any] = {"Bucket": Bucket, "Key": Key}  # type: ignore[misc,explicit-any]
-        if VersionId:
-            kwargs["VersionId"] = VersionId  # type: ignore[misc]
-        return cast(S3GetObjectResponse, self._s3.get_object(**kwargs))  # type: ignore[misc]
+        request: GetObjectRequestTypeDef = {"Bucket": bucket, "Key": key}
+        if version_id is not None:
+            request["VersionId"] = version_id
+
+        response = self._s3.get_object(**request)
+        return cast(S3GetObjectResponse, response)
 
     def put_object(
         self,
-        Bucket: str,
-        Key: str,
-        Body: bytes,
-        ContentType: Optional[str] = None,
-        IfMatch: Optional[str] = None,
-        IfNoneMatch: Optional[str] = None,
-        ServerSideEncryption: Optional[str] = None,
-        SSEKMSKeyId: Optional[str] = None,
+        bucket: str,
+        key: str,
+        body: bytes,
+        content_type: Optional[str] = None,
+        if_match: Optional[str] = None,
+        if_none_match: Optional[str] = None,
+        server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
+        sse_kms_key_id: Optional[str] = None,
     ) -> S3PutObjectResponse:
         """Put object to S3."""
-        kwargs: Dict[str, Any] = {  # type: ignore[misc,explicit-any]
-            "Bucket": Bucket,
-            "Key": Key,
-            "Body": Body,
-        }
-        if ContentType:
-            kwargs["ContentType"] = ContentType  # type: ignore[misc]
-        if IfMatch:
-            kwargs["IfMatch"] = IfMatch  # type: ignore[misc]
-        if IfNoneMatch:
-            kwargs["IfNoneMatch"] = IfNoneMatch  # type: ignore[misc]
-        if ServerSideEncryption:
-            kwargs["ServerSideEncryption"] = ServerSideEncryption  # type: ignore[misc]
-        if SSEKMSKeyId:
-            kwargs["SSEKMSKeyId"] = SSEKMSKeyId  # type: ignore[misc]
-        return cast(S3PutObjectResponse, self._s3.put_object(**kwargs))  # type: ignore[misc]
+        request: PutObjectRequestTypeDef = {"Bucket": bucket, "Key": key, "Body": body}
+        if content_type is not None:
+            request["ContentType"] = content_type
+        if if_match is not None:
+            request["IfMatch"] = if_match
+        if if_none_match is not None:
+            request["IfNoneMatch"] = if_none_match
+        if server_side_encryption is not None:
+            request["ServerSideEncryption"] = server_side_encryption
+        if sse_kms_key_id is not None:
+            request["SSEKMSKeyId"] = sse_kms_key_id
+
+        response = self._s3.put_object(**request)
+        return cast(S3PutObjectResponse, response)
 
     def head_object(
         self,
-        Bucket: str,
-        Key: str,
+        bucket: str,
+        key: str,
     ) -> S3HeadObjectResponse:
         """Get object metadata from S3."""
-        return cast(S3HeadObjectResponse, self._s3.head_object(Bucket=Bucket, Key=Key))  # type: ignore[misc]
+        return cast(S3HeadObjectResponse, self._s3.head_object(Bucket=bucket, Key=key))
 
     def list_object_versions(
         self,
-        Bucket: str,
-        Prefix: str,
-        KeyMarker: Optional[str] = None,
-        VersionIdMarker: Optional[str] = None,
+        bucket: str,
+        prefix: str,
+        key_marker: Optional[str] = None,
+        version_id_marker: Optional[str] = None,
     ) -> S3ListObjectVersionsPage:
         """List object versions."""
-        kwargs: Dict[str, Any] = {"Bucket": Bucket, "Prefix": Prefix}  # type: ignore[misc,explicit-any]
-        if KeyMarker:
-            kwargs["KeyMarker"] = KeyMarker  # type: ignore[misc]
-        if VersionIdMarker:
-            kwargs["VersionIdMarker"] = VersionIdMarker  # type: ignore[misc]
-        return cast(S3ListObjectVersionsPage, self._s3.list_object_versions(**kwargs))  # type: ignore[misc]
+        request: ListObjectVersionsRequestTypeDef = {"Bucket": bucket, "Prefix": prefix}
+        if key_marker is not None:
+            request["KeyMarker"] = key_marker
+        if version_id_marker is not None:
+            request["VersionIdMarker"] = version_id_marker
 
-    def get_paginator(self, operation_name: str) -> Any:  # type: ignore[misc,explicit-any]
+        response = self._s3.list_object_versions(**request)
+        return cast(S3ListObjectVersionsPage, response)
+
+    def get_paginator(self, operation_name: Literal["list_objects_v2"]) -> ListObjectsV2Paginator:
         """Get paginator for list operations."""
-        return self._s3.get_paginator(operation_name)  # type: ignore[misc]
+        return self._s3.get_paginator(operation_name)
 
 
 def read_body_as_json(body: object) -> Dict[str, JSONValue]:
@@ -191,3 +203,46 @@ def get_error_code(error: Exception) -> str:
     """
     error_response = cast(ClientErrorResponse, cast(Any, error).response)  # type: ignore[misc,explicit-any]
     return cast(str, error_response["Error"]["Code"])
+
+
+# S3 response field extraction helpers
+
+
+def log_version_id_from_get(response: S3GetObjectResponse) -> LogVersionId[K]:
+    """Extract LogVersionId from GetObject response."""
+    return LogVersionId(response["VersionId"])
+
+
+def log_version_id_from_put(response: S3PutObjectResponse) -> LogVersionId[K]:
+    """Extract LogVersionId from PutObject response."""
+    return LogVersionId(response["VersionId"])
+
+
+def log_version_id_from_head(response: S3HeadObjectResponse) -> LogVersionId[K]:
+    """Extract LogVersionId from HeadObject response."""
+    return LogVersionId(response["VersionId"])
+
+
+def log_version_id_from_version(version: S3ObjectVersion) -> LogVersionId[K]:
+    """Extract LogVersionId from S3ObjectVersion."""
+    return LogVersionId(version["VersionId"])
+
+
+def key_version_id_from_version(version: S3ObjectVersion) -> KeyVersionId[K]:
+    """Extract KeyVersionId from S3ObjectVersion."""
+    return KeyVersionId(version["VersionId"])
+
+
+def key_object_etag_from_get(response: S3GetObjectResponse) -> KeyObjectETag[K]:
+    """Extract KeyObjectETag from GetObject response."""
+    return KeyObjectETag(response["ETag"])
+
+
+def key_object_etag_from_put(response: S3PutObjectResponse) -> KeyObjectETag[K]:
+    """Extract KeyObjectETag from PutObject response."""
+    return KeyObjectETag(response["ETag"])
+
+
+def key_object_etag_from_head(response: S3HeadObjectResponse) -> KeyObjectETag[K]:
+    """Extract KeyObjectETag from HeadObject response."""
+    return KeyObjectETag(response["ETag"])

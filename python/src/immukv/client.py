@@ -1,13 +1,12 @@
 """ImmuKV client implementation."""
 
-import hashlib
-import json
 import logging
 import time
 from typing import Any, Dict, Generic, List, Optional, Tuple, TypeVar, cast
 
 import boto3
 from botocore.exceptions import ClientError
+from mypy_boto3_s3.client import S3Client
 
 from immukv.json_helpers import (
     JSONValue,
@@ -18,7 +17,16 @@ from immukv.json_helpers import (
     get_int,
     get_str,
 )
-from immukv.s3_wrapper import TypedS3Client, get_error_code, read_body_as_json
+from immukv.s3_wrapper import (
+    TypedS3Client,
+    get_error_code,
+    key_object_etag_from_head,
+    key_object_etag_from_put,
+    key_version_id_from_version,
+    log_version_id_from_put,
+    log_version_id_from_version,
+    read_body_as_json,
+)
 from immukv.types import (
     Config,
     Entry,
@@ -33,6 +41,13 @@ from immukv.types import (
     ReadOnlyError,
     Sequence,
     TimestampMs,
+    hash_compute,
+    hash_from_json,
+    hash_genesis,
+    sequence_from_json,
+    sequence_initial,
+    sequence_next,
+    timestamp_now,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,8 +83,8 @@ class ImmuKVClient(Generic[K, V]):
         """
         self.config = config
         self.value_parser = value_parser
-        raw_s3 = boto3.client("s3", region_name=config.s3_region)  # type: ignore[misc]
-        self.s3 = TypedS3Client(raw_s3)  # type: ignore[misc]
+        raw_s3: S3Client = boto3.client("s3", region_name=config.s3_region)  # type: ignore[assignment]
+        self.s3 = TypedS3Client(raw_s3)
         self.log_key = f"{config.s3_prefix}_log.json"
         self._last_repair_check_ms = 0  # In-memory timestamp tracking
         self._can_write: Optional[bool] = None  # Permission cache
@@ -116,8 +131,8 @@ class ImmuKVClient(Generic[K, V]):
             key_path = f"{self.config.s3_prefix}keys/{key}.json"
             current_key_etag: Optional[KeyObjectETag[K]] = None
             try:
-                current_key = self.s3.head_object(Bucket=self.config.s3_bucket, Key=key_path)
-                current_key_etag = cast(KeyObjectETag[K], current_key["ETag"])
+                current_key = self.s3.head_object(bucket=self.config.s3_bucket, key=key_path)
+                current_key_etag = key_object_etag_from_head(current_key)
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
                 if get_error_code(e) in ["NoSuchKey", "404"]:
                     current_key_etag = None
@@ -125,8 +140,10 @@ class ImmuKVClient(Generic[K, V]):
                     raise
 
             # Step 2: Create new log entry
-            new_sequence = cast(Sequence[K], (sequence or 0) + 1)
-            timestamp_ms = cast(TimestampMs[K], int(time.time() * 1000))
+            new_sequence: Sequence[K] = (
+                sequence_next(sequence) if sequence is not None else sequence_from_json(0)
+            )
+            timestamp_ms: TimestampMs[K] = timestamp_now()
 
             # Step 3: Calculate hash
             entry_for_hash: LogEntryForHash[K, V] = {
@@ -155,23 +172,23 @@ class ImmuKVClient(Generic[K, V]):
                 if log_etag:
                     # Update existing log - use IfMatch
                     response = self.s3.put_object(
-                        Bucket=self.config.s3_bucket,
-                        Key=self.log_key,
-                        Body=dumps_canonical(cast(JSONValue, log_entry)),
-                        ContentType="application/json",
-                        IfMatch=log_etag,
+                        bucket=self.config.s3_bucket,
+                        key=self.log_key,
+                        body=dumps_canonical(cast(JSONValue, log_entry)),
+                        content_type="application/json",
+                        if_match=log_etag,
                     )
                 else:
-                    # First write - use IfNoneMatch='*'
+                    # First write - use if_none_match='*'
                     response = self.s3.put_object(
-                        Bucket=self.config.s3_bucket,
-                        Key=self.log_key,
-                        Body=dumps_canonical(cast(JSONValue, log_entry)),
-                        ContentType="application/json",
-                        IfNoneMatch="*",
+                        bucket=self.config.s3_bucket,
+                        key=self.log_key,
+                        body=dumps_canonical(cast(JSONValue, log_entry)),
+                        content_type="application/json",
+                        if_none_match="*",
                     )
 
-                new_log_version_id = cast(LogVersionId[K], response["VersionId"])
+                new_log_version_id: LogVersionId[K] = log_version_id_from_put(response)
                 break  # ✅ Committed to log! Exit retry loop
 
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
@@ -202,23 +219,23 @@ class ImmuKVClient(Generic[K, V]):
             if current_key_etag:
                 # UPDATE existing key object - use IfMatch
                 response = self.s3.put_object(
-                    Bucket=self.config.s3_bucket,
-                    Key=key_path,
-                    Body=dumps_canonical(cast(JSONValue, key_data)),
-                    ContentType="application/json",
-                    IfMatch=current_key_etag,
+                    bucket=self.config.s3_bucket,
+                    key=key_path,
+                    body=dumps_canonical(cast(JSONValue, key_data)),
+                    content_type="application/json",
+                    if_match=current_key_etag,
                 )
-                key_object_etag = cast(KeyObjectETag[K], response["ETag"])
+                key_object_etag = key_object_etag_from_put(response)
             else:
-                # CREATE new key object - use IfNoneMatch='*'
+                # CREATE new key object - use if_none_match='*'
                 response = self.s3.put_object(
-                    Bucket=self.config.s3_bucket,
-                    Key=key_path,
-                    Body=dumps_canonical(cast(JSONValue, key_data)),
-                    ContentType="application/json",
-                    IfNoneMatch="*",
+                    bucket=self.config.s3_bucket,
+                    key=key_path,
+                    body=dumps_canonical(cast(JSONValue, key_data)),
+                    content_type="application/json",
+                    if_none_match="*",
                 )
-                key_object_etag = cast(KeyObjectETag[K], response["ETag"])
+                key_object_etag = key_object_etag_from_put(response)
 
         except Exception as e:
             logger.warning(
@@ -266,7 +283,7 @@ class ImmuKVClient(Generic[K, V]):
         # Try to read from key object
         key_path = f"{self.config.s3_prefix}keys/{key}.json"
         try:
-            response = self.s3.get_object(Bucket=self.config.s3_bucket, Key=key_path)
+            response = self.s3.get_object(bucket=self.config.s3_bucket, key=key_path)
             data = read_body_as_json(response["Body"])
             return entry_from_key_object(data, self.value_parser)
 
@@ -291,7 +308,7 @@ class ImmuKVClient(Generic[K, V]):
         """Get specific log version by S3 version ID."""
         try:
             response = self.s3.get_object(
-                Bucket=self.config.s3_bucket, Key=self.log_key, VersionId=version_id
+                bucket=self.config.s3_bucket, key=self.log_key, version_id=version_id
             )
             data = read_body_as_json(response["Body"])
             return entry_from_log(data, version_id, self.value_parser)
@@ -339,8 +356,8 @@ class ImmuKVClient(Generic[K, V]):
 
             while True:
                 list_params: Dict[str, Any] = {  # type: ignore[misc,explicit-any]
-                    "Bucket": self.config.s3_bucket,
-                    "Prefix": key_path,
+                    "bucket": self.config.s3_bucket,
+                    "prefix": key_path,
                 }
                 if key_marker:
                     list_params["KeyMarker"] = key_marker  # type: ignore[misc]
@@ -358,11 +375,11 @@ class ImmuKVClient(Generic[K, V]):
                         continue
 
                     # Fetch version data
-                    key_version_id = cast(KeyVersionId[K], version["VersionId"])
+                    key_version_id: KeyVersionId[K] = key_version_id_from_version(version)
                     response = self.s3.get_object(
-                        Bucket=self.config.s3_bucket,
-                        Key=key_path,
-                        VersionId=key_version_id,
+                        bucket=self.config.s3_bucket,
+                        key=key_path,
+                        version_id=key_version_id,
                     )
                     data = read_body_as_json(response["Body"])
                     entry: Entry[K, V] = entry_from_key_object(data, self.value_parser)
@@ -414,8 +431,8 @@ class ImmuKVClient(Generic[K, V]):
 
             while True:
                 list_params: Dict[str, Any] = {  # type: ignore[misc,explicit-any]
-                    "Bucket": self.config.s3_bucket,
-                    "Prefix": self.log_key,
+                    "bucket": self.config.s3_bucket,
+                    "prefix": self.log_key,
                 }
                 if key_marker:
                     list_params["KeyMarker"] = key_marker  # type: ignore[misc]
@@ -434,12 +451,12 @@ class ImmuKVClient(Generic[K, V]):
 
                     # Fetch version data
                     response = self.s3.get_object(
-                        Bucket=self.config.s3_bucket,
-                        Key=self.log_key,
-                        VersionId=version["VersionId"],
+                        bucket=self.config.s3_bucket,
+                        key=self.log_key,
+                        version_id=version["VersionId"],
                     )
                     data = read_body_as_json(response["Body"])
-                    version_id_log = cast(LogVersionId[K], version["VersionId"])
+                    version_id_log: LogVersionId[K] = log_version_id_from_version(version)
                     entry: Entry[K, V] = entry_from_log(data, version_id_log, self.value_parser)
                     entries.append(entry)
 
@@ -475,7 +492,7 @@ class ImmuKVClient(Generic[K, V]):
         prefix = f"{self.config.s3_prefix}keys/"
 
         try:
-            paginator = self.s3.get_paginator("list_objects_v2")  # type: ignore[misc]
+            paginator = self.s3.get_paginator("list_objects_v2")
             page_iterator = paginator.paginate(  # type: ignore[misc]
                 Bucket=self.config.s3_bucket,
                 Prefix=prefix,
@@ -577,27 +594,7 @@ class ImmuKVClient(Generic[K, V]):
 
         Canonical String Format: <sequence>|<key>|<value_json>|<timestamp_ms>|<previous_hash>
         """
-        # Canonicalize value (sorted keys, no whitespace)
-        value_json = json.dumps(entry_for_hash["value"], sort_keys=True, separators=(",", ":"))
-
-        # Construct canonical string
-        canonical = (
-            f"{entry_for_hash['sequence']}|"
-            f"{entry_for_hash['key']}|"
-            f"{value_json}|"
-            f"{entry_for_hash['timestamp_ms']}|"
-            f"{entry_for_hash['previous_hash']}"
-        )
-
-        # Encode to UTF-8 bytes
-        data_bytes = canonical.encode("utf-8")
-
-        # Compute SHA-256 hash
-        hash_bytes = hashlib.sha256(data_bytes).digest()
-
-        # Convert to hex and add prefix
-        hash_hex = hash_bytes.hex()
-        return cast(Hash[K], f"sha256:{hash_hex}")
+        return hash_compute(entry_for_hash)
 
     def _get_latest_and_repair(self) -> LatestLogState[K, V]:
         """Get latest log state and repair orphaned entry if needed.
@@ -612,14 +609,14 @@ class ImmuKVClient(Generic[K, V]):
         """
         # Try to read current log
         try:
-            response = self.s3.get_object(Bucket=self.config.s3_bucket, Key=self.log_key)
+            response = self.s3.get_object(bucket=self.config.s3_bucket, key=self.log_key)
             log_etag = cast(str, response["ETag"])
-            current_version_id = cast(LogVersionId[K], response["VersionId"])
+            current_version_id: LogVersionId[K] = LogVersionId(response["VersionId"])
             data = read_body_as_json(response["Body"])
 
             prev_version_id: LogVersionId[K] = current_version_id
-            prev_hash = cast(Hash[K], get_str(data, "hash"))
-            sequence = cast(Sequence[K], get_int(data, "sequence"))
+            prev_hash: Hash[K] = hash_from_json(get_str(data, "hash"))
+            sequence: Sequence[K] = sequence_from_json(get_int(data, "sequence"))
 
             # Create entry from latest log data
             latest_entry: Entry[K, V] = entry_from_log(data, current_version_id, self.value_parser)
@@ -642,8 +639,8 @@ class ImmuKVClient(Generic[K, V]):
                 return {
                     "log_etag": None,
                     "prev_version_id": None,
-                    "prev_hash": cast(Hash[K], "sha256:genesis"),
-                    "sequence": cast(Sequence[K], -1),  # Will become 0
+                    "prev_hash": hash_genesis(),
+                    "sequence": sequence_initial(),
                     "can_write": None,
                     "orphan_status": None,
                 }
@@ -667,7 +664,7 @@ class ImmuKVClient(Generic[K, V]):
             # Check if this key object exists
             key_path = f"{self.config.s3_prefix}keys/{latest_log.key}.json"
             try:
-                self.s3.head_object(Bucket=self.config.s3_bucket, Key=key_path)
+                self.s3.head_object(bucket=self.config.s3_bucket, key=key_path)
                 # Key object exists - not orphaned
                 orphan_status: OrphanStatus[K, V] = {
                     "is_orphaned": False,
@@ -704,23 +701,23 @@ class ImmuKVClient(Generic[K, V]):
 
         try:
             if latest_log.previous_key_object_etag:
-                # UPDATE with IfMatch=<previous_etag>
+                # UPDATE with if_match=<previous_etag>
                 self.s3.put_object(
-                    Bucket=self.config.s3_bucket,
-                    Key=key_path,
-                    Body=dumps_canonical(cast(JSONValue, repair_data)),
-                    ContentType="application/json",
-                    IfMatch=latest_log.previous_key_object_etag,
+                    bucket=self.config.s3_bucket,
+                    key=key_path,
+                    body=dumps_canonical(cast(JSONValue, repair_data)),
+                    content_type="application/json",
+                    if_match=latest_log.previous_key_object_etag,
                 )
                 logger.info(f"Propagated log entry to key object for {latest_log.key}")
             else:
-                # CREATE with IfNoneMatch='*'
+                # CREATE with if_none_match='*'
                 self.s3.put_object(
-                    Bucket=self.config.s3_bucket,
-                    Key=key_path,
-                    Body=dumps_canonical(cast(JSONValue, repair_data)),
-                    ContentType="application/json",
-                    IfNoneMatch="*",
+                    bucket=self.config.s3_bucket,
+                    key=key_path,
+                    body=dumps_canonical(cast(JSONValue, repair_data)),
+                    content_type="application/json",
+                    if_none_match="*",
                 )
                 logger.info(f"Created key object for {latest_log.key}")
 

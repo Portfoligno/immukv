@@ -2,6 +2,9 @@
  * Type definitions for ImmuKV.
  */
 
+import * as crypto from 'crypto';
+import { stringifyCanonical, JSONValue } from './jsonHelpers';
+
 // Branded types parameterized by key type
 // These are branded types to prevent mixing version IDs from different contexts
 export type LogVersionId<K extends string> = string & {
@@ -114,4 +117,97 @@ export class ReadOnlyError extends Error {
     super(message);
     this.name = 'ReadOnlyError';
   }
+}
+
+// Factory functions for branded types
+
+/**
+ * Compute SHA-256 hash from log entry data.
+ *
+ * @param data - Log entry data to hash (excludes version_id, log_version_id, hash)
+ * @returns Hash in format 'sha256:<64 hex characters>'
+ */
+export function hashCompute<K extends string, V>(data: LogEntryForHash<K, V>): Hash<K> {
+  const canonical = stringifyCanonical(data as unknown as JSONValue);
+  const hashBytes = crypto.createHash('sha256').update(canonical, 'utf-8').digest('hex');
+  return `sha256:${hashBytes}` as Hash<K>;
+}
+
+/**
+ * Return genesis hash for the first entry in a chain.
+ *
+ * @returns Genesis hash 'sha256:genesis'
+ */
+export function hashGenesis<K extends string>(): Hash<K> {
+  return 'sha256:genesis' as Hash<K>;
+}
+
+/**
+ * Parse hash from JSON string with validation.
+ *
+ * @param s - Hash string from JSON
+ * @returns Validated Hash type
+ * @throws Error if hash format is invalid
+ */
+export function hashFromJson<K extends string>(s: string): Hash<K> {
+  if (!s.startsWith('sha256:')) {
+    throw new Error(`Invalid hash format (must start with 'sha256:'): ${s}`);
+  }
+  return s as Hash<K>;
+}
+
+/**
+ * Return initial sequence number before first entry.
+ *
+ * @returns Sequence number -1 (will become 0 on first write)
+ */
+export function sequenceInitial<K extends string>(): Sequence<K> {
+  return -1 as Sequence<K>;
+}
+
+/**
+ * Increment sequence number.
+ *
+ * @param seq - Current sequence number
+ * @returns Next sequence number (seq + 1)
+ */
+export function sequenceNext<K extends string>(seq: Sequence<K>): Sequence<K> {
+  return (seq + 1) as Sequence<K>;
+}
+
+/**
+ * Parse sequence from JSON with validation.
+ *
+ * @param n - Sequence number from JSON
+ * @returns Validated Sequence type
+ * @throws Error if sequence is invalid (< -1)
+ */
+export function sequenceFromJson<K extends string>(n: number): Sequence<K> {
+  if (n < -1) {
+    throw new Error(`Invalid sequence (must be >= -1): ${n}`);
+  }
+  return n as Sequence<K>;
+}
+
+/**
+ * Return current timestamp in milliseconds.
+ *
+ * @returns Current Unix epoch time in milliseconds
+ */
+export function timestampNow<K extends string>(): TimestampMs<K> {
+  return Date.now() as TimestampMs<K>;
+}
+
+/**
+ * Parse timestamp from JSON with validation.
+ *
+ * @param n - Timestamp in milliseconds from JSON
+ * @returns Validated TimestampMs type
+ * @throws Error if timestamp is invalid (<= 0)
+ */
+export function timestampFromJson<K extends string>(n: number): TimestampMs<K> {
+  if (n <= 0) {
+    throw new Error(`Invalid timestamp (must be > 0): ${n}`);
+  }
+  return n as TimestampMs<K>;
 }

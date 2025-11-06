@@ -8,11 +8,11 @@ from typing import Callable, Dict, List, Optional, TypeVar, Union, cast
 
 from immukv.types import (
     Entry,
-    Hash,
     KeyObjectETag,
     LogVersionId,
-    Sequence,
-    TimestampMs,
+    hash_from_json,
+    sequence_from_json,
+    timestamp_from_json,
 )
 
 # Type variables for generic key and value types
@@ -72,12 +72,12 @@ def entry_from_key_object(data: Dict[str, JSONValue], value_parser: ValueParser[
     return Entry(
         key=cast(K, get_str(data, "key")),
         value=value,
-        timestamp_ms=cast(TimestampMs[K], get_int(data, "timestamp_ms")),
-        version_id=cast(LogVersionId[K], get_str(data, "log_version_id")),
-        sequence=cast(Sequence[K], get_int(data, "sequence")),
+        timestamp_ms=timestamp_from_json(get_int(data, "timestamp_ms")),
+        version_id=LogVersionId(get_str(data, "log_version_id")),
+        sequence=sequence_from_json(get_int(data, "sequence")),
         previous_version_id=None,
-        hash=cast(Hash[K], get_str(data, "hash")),
-        previous_hash=cast(Hash[K], get_str(data, "previous_hash")),
+        hash=hash_from_json(get_str(data, "hash")),
+        previous_hash=hash_from_json(get_str(data, "previous_hash")),
         previous_key_object_etag=None,
     )
 
@@ -104,13 +104,13 @@ def entry_from_log(
     return Entry(
         key=cast(K, get_str(data, "key")),
         value=value,
-        timestamp_ms=cast(TimestampMs[K], get_int(data, "timestamp_ms")),
+        timestamp_ms=timestamp_from_json(get_int(data, "timestamp_ms")),
         version_id=version_id,
-        sequence=cast(Sequence[K], get_int(data, "sequence")),
-        previous_version_id=cast(Optional[LogVersionId[K]], prev_version_id_str),
-        hash=cast(Hash[K], get_str(data, "hash")),
-        previous_hash=cast(Hash[K], get_str(data, "previous_hash")),
-        previous_key_object_etag=cast(Optional[KeyObjectETag[K]], prev_key_etag_str),
+        sequence=sequence_from_json(get_int(data, "sequence")),
+        previous_version_id=LogVersionId(prev_version_id_str) if prev_version_id_str else None,
+        hash=hash_from_json(get_str(data, "hash")),
+        previous_hash=hash_from_json(get_str(data, "previous_hash")),
+        previous_key_object_etag=KeyObjectETag(prev_key_etag_str) if prev_key_etag_str else None,
     )
 
 

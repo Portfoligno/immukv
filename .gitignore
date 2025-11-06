@@ -1,2 +1,14 @@
+# IDE / Editor
+/.idea
+
+# TypeScript
 /typescript/node_modules
+/typescript/dist
+
+# Python
+/python/src/immukv/__pycache__
+/python/tests/__pycache__
+/python/src/immukv.egg-info
+
+# Project-specific
 /WORKSPACE.md
