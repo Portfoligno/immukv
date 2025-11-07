@@ -5,6 +5,17 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2025-11-08
+
+### Changed
+
+- **BREAKING**: Python minimum version requirement increased to 3.11+ (previously 3.9+)
+- **BREAKING**: Public API reduced to core interfaces only
+  - Python: Removed hash_compute, hash_genesis, hash_from_json, sequence_initial, sequence_next, sequence_from_json, timestamp_now, timestamp_from_json from exports
+  - TypeScript: Removed hashCompute, hashGenesis, hashFromJson, sequenceInitial, sequenceNext, sequenceFromJson, timestampNow, timestampFromJson, LogEntryForHash, OrphanStatus from exports
+  - Public API now exposes: ImmuKVClient, Config, Entry, ValueParser, JSONValue, KeyNotFoundError, ReadOnlyError
+- Internal: S3 path branding with generic key type parameter for improved type safety
+
 ## [0.1.8] - 2025-11-07
 
 ### Changed
@@ -73,6 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.9]: https://github.com/Portfoligno/immukv/releases/tag/0.1.9
+[0.1.8]: https://github.com/Portfoligno/immukv/releases/tag/0.1.8
 [0.1.7]: https://github.com/Portfoligno/immukv/releases/tag/0.1.7
 [0.1.6]: https://github.com/Portfoligno/immukv/releases/tag/0.1.6
 [0.1.5]: https://github.com/Portfoligno/immukv/releases/tag/0.1.5
