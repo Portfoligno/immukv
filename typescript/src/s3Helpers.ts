@@ -4,18 +4,46 @@
  * Centralizes type handling for AWS SDK responses to maintain type safety.
  */
 
+import * as s3 from '@aws-sdk/client-s3';
 import { JSONValue } from './jsonHelpers';
-import { LogVersionId, KeyVersionId, KeyObjectETag } from './types';
+import { LogVersionId, KeyVersionId, KeyObjectETag, brandWithKey } from './types';
 
 /**
- * S3 Body type from AWS SDK GetObject response.
- * The Body can be a stream that needs to be read.
+ * Branded type for log keys (constant key type for log file paths).
+ * @internal
  */
-type S3Body =
-  | {
-      transformToString: (encoding?: string) => Promise<string>;
-    }
-  | undefined;
+export type LogKey = string & {
+  readonly __brand: 'LogKey';
+};
+
+/**
+ * Branded S3 path string carrying the key type K.
+ * @internal
+ */
+export type S3KeyPath<K extends string> = string & {
+  readonly __brand: 'S3KeyPath';
+  readonly __key: K;
+};
+
+/**
+ * Factory methods for creating S3 key paths.
+ * @internal
+ */
+export const S3KeyPaths = {
+  /**
+   * Create S3 path for a key object.
+   */
+  forKey: <K extends string>(prefix: string, key: K): S3KeyPath<K> => {
+    return brandWithKey<string, 'S3KeyPath', K>(`${prefix}keys/${key}.json`);
+  },
+
+  /**
+   * Create S3 path for the log file.
+   */
+  forLog: (prefix: string): S3KeyPath<LogKey> => {
+    return `${prefix}_log.json` as S3KeyPath<LogKey>;
+  },
+} as const;
 
 /**
  * Read S3 Body stream and parse as JSON.
@@ -25,8 +53,11 @@ type S3Body =
  * @param body - S3 response body stream
  * @returns Parsed JSON object
  * @throws Error if body is undefined or JSON parsing fails
+ * @internal
  */
-export async function readBodyAsJson(body: S3Body): Promise<{ [key: string]: JSONValue }> {
+export async function readBodyAsJson(
+  body: s3.GetObjectCommandOutput['Body']
+): Promise<{ [key: string]: JSONValue }> {
   if (!body) {
     throw new Error('S3 response body is undefined');
   }
@@ -41,105 +72,200 @@ export async function readBodyAsJson(body: S3Body): Promise<{ [key: string]: JSO
  *
  * @param error - AWS SDK error object
  * @returns Error code string
+ * @internal
  */
 export function getErrorCode(error: any): string {
   return error.name || error.$metadata?.httpStatusCode?.toString() || 'Unknown';
 }
 
-// S3 response types (simplified - only fields we use)
-
-interface S3GetObjectResponse {
-  VersionId?: string;
-  ETag?: string;
-  Body?: S3Body;
-}
-
-interface S3PutObjectResponse {
-  VersionId?: string;
-  ETag?: string;
-}
-
-interface S3HeadObjectResponse {
-  VersionId?: string;
-  ETag?: string;
-}
-
-interface S3ObjectVersion {
-  VersionId?: string;
-  Key?: string;
-  ETag?: string;
-}
-
-// S3 response field extraction helpers
+// Branded AWS SDK response types and their helpers
 
 /**
- * Extract LogVersionId from GetObject response.
+ * Branded GetObjectCommandOutput for nominal typing.
+ * @internal
  */
-export function logVersionIdFromGet<K extends string>(
-  response: S3GetObjectResponse
-): LogVersionId<K> {
-  return response.VersionId as LogVersionId<K>;
-}
+export type GetObjectCommandOutput<K extends string> = s3.GetObjectCommandOutput & {
+  readonly __brand: 'GetObjectCommandOutput';
+  readonly __key: K;
+};
 
 /**
- * Extract LogVersionId from PutObject response.
+ * Helper functions for GetObjectCommandOutput.
+ * @internal
  */
-export function logVersionIdFromPut<K extends string>(
-  response: S3PutObjectResponse
-): LogVersionId<K> {
-  return response.VersionId as LogVersionId<K>;
-}
+export const GetObjectCommandOutputs = {
+  /**
+   * Extract LogVersionId from GetObjectCommandOutput (for log operations).
+   */
+  logVersionId: <K extends string>(
+    response: GetObjectCommandOutput<LogKey>
+  ): LogVersionId<K> | undefined => {
+    return response.VersionId
+      ? brandWithKey<string, 'LogVersionId', K>(response.VersionId)
+      : undefined;
+  },
+
+  /**
+   * Extract KeyObjectETag from GetObjectCommandOutput (for key operations).
+   */
+  keyObjectEtag: <K extends string>(
+    response: GetObjectCommandOutput<K>
+  ): KeyObjectETag<K> | undefined => {
+    return response.ETag ? brandWithKey<string, 'KeyObjectETag', K>(response.ETag) : undefined;
+  },
+} as const;
 
 /**
- * Extract LogVersionId from HeadObject response.
+ * Branded PutObjectCommandOutput for nominal typing.
+ * @internal
  */
-export function logVersionIdFromHead<K extends string>(
-  response: S3HeadObjectResponse
-): LogVersionId<K> {
-  return response.VersionId as LogVersionId<K>;
-}
+export type PutObjectCommandOutput<K extends string> = s3.PutObjectCommandOutput & {
+  readonly __brand: 'PutObjectCommandOutput';
+  readonly __key: K;
+};
 
 /**
- * Extract LogVersionId from S3ObjectVersion.
+ * Helper functions for PutObjectCommandOutput.
+ * @internal
  */
-export function logVersionIdFromVersion<K extends string>(
-  version: S3ObjectVersion
-): LogVersionId<K> {
-  return version.VersionId as LogVersionId<K>;
-}
+export const PutObjectCommandOutputs = {
+  /**
+   * Extract LogVersionId from PutObjectCommandOutput (for log operations).
+   */
+  logVersionId: <K extends string>(
+    response: PutObjectCommandOutput<LogKey>
+  ): LogVersionId<K> | undefined => {
+    return response.VersionId
+      ? brandWithKey<string, 'LogVersionId', K>(response.VersionId)
+      : undefined;
+  },
+
+  /**
+   * Extract KeyObjectETag from PutObjectCommandOutput (for key operations).
+   */
+  keyObjectEtag: <K extends string>(
+    response: PutObjectCommandOutput<K>
+  ): KeyObjectETag<K> | undefined => {
+    return response.ETag ? brandWithKey<string, 'KeyObjectETag', K>(response.ETag) : undefined;
+  },
+} as const;
 
 /**
- * Extract KeyVersionId from S3ObjectVersion.
+ * Branded HeadObjectCommandOutput for nominal typing.
+ * @internal
  */
-export function keyVersionIdFromVersion<K extends string>(
-  version: S3ObjectVersion
-): KeyVersionId<K> {
-  return version.VersionId as KeyVersionId<K>;
-}
+export type HeadObjectCommandOutput<K extends string> = s3.HeadObjectCommandOutput & {
+  readonly __brand: 'HeadObjectCommandOutput';
+  readonly __key: K;
+};
 
 /**
- * Extract KeyObjectETag from GetObject response.
+ * Helper functions for HeadObjectCommandOutput.
+ * @internal
  */
-export function keyObjectEtagFromGet<K extends string>(
-  response: S3GetObjectResponse
-): KeyObjectETag<K> {
-  return response.ETag as KeyObjectETag<K>;
-}
+export const HeadObjectCommandOutputs = {
+  /**
+   * Extract LogVersionId from HeadObjectCommandOutput (for log operations).
+   */
+  logVersionId: <K extends string>(
+    response: HeadObjectCommandOutput<LogKey>
+  ): LogVersionId<K> | undefined => {
+    return response.VersionId
+      ? brandWithKey<string, 'LogVersionId', K>(response.VersionId)
+      : undefined;
+  },
+
+  /**
+   * Extract KeyObjectETag from HeadObjectCommandOutput (for key operations).
+   */
+  keyObjectEtag: <K extends string>(
+    response: HeadObjectCommandOutput<K>
+  ): KeyObjectETag<K> | undefined => {
+    return response.ETag ? brandWithKey<string, 'KeyObjectETag', K>(response.ETag) : undefined;
+  },
+} as const;
 
 /**
- * Extract KeyObjectETag from PutObject response.
+ * Branded ObjectVersion for nominal typing.
+ * @internal
  */
-export function keyObjectEtagFromPut<K extends string>(
-  response: S3PutObjectResponse
-): KeyObjectETag<K> {
-  return response.ETag as KeyObjectETag<K>;
-}
+export type ObjectVersion<K extends string> = s3.ObjectVersion & {
+  readonly __brand: 'ObjectVersion';
+  readonly __key: K;
+};
 
 /**
- * Extract KeyObjectETag from HeadObject response.
+ * Helper functions for ObjectVersion.
+ * @internal
  */
-export function keyObjectEtagFromHead<K extends string>(
-  response: S3HeadObjectResponse
-): KeyObjectETag<K> {
-  return response.ETag as KeyObjectETag<K>;
+export const ObjectVersions = {
+  /**
+   * Extract LogVersionId from ObjectVersion (for log operations).
+   */
+  logVersionId: <K extends string>(version: ObjectVersion<LogKey>): LogVersionId<K> | undefined => {
+    return version.VersionId
+      ? brandWithKey<string, 'LogVersionId', K>(version.VersionId)
+      : undefined;
+  },
+
+  /**
+   * Extract KeyVersionId from ObjectVersion (for key operations).
+   */
+  keyVersionId: <K extends string>(version: ObjectVersion<K>): KeyVersionId<K> | undefined => {
+    return version.VersionId
+      ? brandWithKey<string, 'KeyVersionId', K>(version.VersionId)
+      : undefined;
+  },
+} as const;
+
+/**
+ * Branded S3 client wrapper returning nominally-typed responses.
+ * @internal
+ */
+export class BrandedS3Client {
+  constructor(private s3: s3.S3Client) {}
+
+  async getObject<K extends string>(
+    params: s3.GetObjectCommandInput & { Key: S3KeyPath<K> }
+  ): Promise<GetObjectCommandOutput<K>> {
+    const response = await this.s3.send(new s3.GetObjectCommand(params));
+    return brandWithKey<s3.GetObjectCommandOutput, 'GetObjectCommandOutput', K>(response);
+  }
+
+  async putObject<K extends string>(
+    params: s3.PutObjectCommandInput & { Key: S3KeyPath<K> }
+  ): Promise<PutObjectCommandOutput<K>> {
+    const response = await this.s3.send(new s3.PutObjectCommand(params));
+    return brandWithKey<s3.PutObjectCommandOutput, 'PutObjectCommandOutput', K>(response);
+  }
+
+  async headObject<K extends string>(
+    params: s3.HeadObjectCommandInput & { Key: S3KeyPath<K> }
+  ): Promise<HeadObjectCommandOutput<K>> {
+    const response = await this.s3.send(new s3.HeadObjectCommand(params));
+    return brandWithKey<s3.HeadObjectCommandOutput, 'HeadObjectCommandOutput', K>(response);
+  }
+
+  async listObjectVersions<K extends string>(
+    params: s3.ListObjectVersionsCommandInput & {
+      Prefix: S3KeyPath<K>;
+      KeyMarker?: S3KeyPath<K>;
+    }
+  ): Promise<{
+    Versions?: ObjectVersion<K>[];
+    IsTruncated?: boolean;
+    NextKeyMarker?: string;
+    NextVersionIdMarker?: string;
+  }> {
+    const response = await this.s3.send(new s3.ListObjectVersionsCommand(params));
+    return {
+      ...response,
+      Versions: response.Versions?.map(v => brandWithKey<s3.ObjectVersion, 'ObjectVersion', K>(v)),
+    };
+  }
+
+  // Direct access to underlying S3Client for operations not wrapped
+  get client(): s3.S3Client {
+    return this.s3;
+  }
 }

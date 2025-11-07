@@ -5,6 +5,24 @@
 import * as crypto from 'crypto';
 import { stringifyCanonical, JSONValue } from './jsonHelpers';
 
+// Generic branding utilities
+
+/**
+ * Brand a value with a type marker (for types without key parameter).
+ */
+export function brand<T, B extends string>(value: T): T & { readonly __brand: B } {
+  return value as T & { readonly __brand: B };
+}
+
+/**
+ * Brand a value with type and key markers (for types with key parameter).
+ */
+export function brandWithKey<T, B extends string, K extends string>(
+  value: T
+): T & { readonly __brand: B; readonly __key: K } {
+  return value as T & { readonly __brand: B; readonly __key: K };
+}
+
 // Branded types parameterized by key type
 // These are branded types to prevent mixing version IDs from different contexts
 export type LogVersionId<K extends string> = string & {
@@ -130,7 +148,7 @@ export class ReadOnlyError extends Error {
 export function hashCompute<K extends string, V>(data: LogEntryForHash<K, V>): Hash<K> {
   const canonical = stringifyCanonical(data as unknown as JSONValue);
   const hashBytes = crypto.createHash('sha256').update(canonical, 'utf-8').digest('hex');
-  return `sha256:${hashBytes}` as Hash<K>;
+  return brandWithKey<string, 'Hash', K>(`sha256:${hashBytes}`);
 }
 
 /**
@@ -139,7 +157,7 @@ export function hashCompute<K extends string, V>(data: LogEntryForHash<K, V>): H
  * @returns Genesis hash 'sha256:genesis'
  */
 export function hashGenesis<K extends string>(): Hash<K> {
-  return 'sha256:genesis' as Hash<K>;
+  return brandWithKey<string, 'Hash', K>('sha256:genesis');
 }
 
 /**
@@ -153,7 +171,7 @@ export function hashFromJson<K extends string>(s: string): Hash<K> {
   if (!s.startsWith('sha256:')) {
     throw new Error(`Invalid hash format (must start with 'sha256:'): ${s}`);
   }
-  return s as Hash<K>;
+  return brandWithKey<string, 'Hash', K>(s);
 }
 
 /**
@@ -162,7 +180,7 @@ export function hashFromJson<K extends string>(s: string): Hash<K> {
  * @returns Sequence number -1 (will become 0 on first write)
  */
 export function sequenceInitial<K extends string>(): Sequence<K> {
-  return -1 as Sequence<K>;
+  return brandWithKey<number, 'Sequence', K>(-1);
 }
 
 /**
@@ -172,7 +190,7 @@ export function sequenceInitial<K extends string>(): Sequence<K> {
  * @returns Next sequence number (seq + 1)
  */
 export function sequenceNext<K extends string>(seq: Sequence<K>): Sequence<K> {
-  return (seq + 1) as Sequence<K>;
+  return brandWithKey<number, 'Sequence', K>(seq + 1);
 }
 
 /**
@@ -186,7 +204,7 @@ export function sequenceFromJson<K extends string>(n: number): Sequence<K> {
   if (n < -1) {
     throw new Error(`Invalid sequence (must be >= -1): ${n}`);
   }
-  return n as Sequence<K>;
+  return brandWithKey<number, 'Sequence', K>(n);
 }
 
 /**
@@ -195,7 +213,7 @@ export function sequenceFromJson<K extends string>(n: number): Sequence<K> {
  * @returns Current Unix epoch time in milliseconds
  */
 export function timestampNow<K extends string>(): TimestampMs<K> {
-  return Date.now() as TimestampMs<K>;
+  return brandWithKey<number, 'TimestampMs', K>(Date.now());
 }
 
 /**
@@ -209,5 +227,5 @@ export function timestampFromJson<K extends string>(n: number): TimestampMs<K> {
   if (n <= 0) {
     throw new Error(`Invalid timestamp (must be > 0): ${n}`);
   }
-  return n as TimestampMs<K>;
+  return brandWithKey<number, 'TimestampMs', K>(n);
 }
