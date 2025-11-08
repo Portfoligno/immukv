@@ -3,7 +3,7 @@
 These types are not part of the public API and should only be used internally.
 """
 
-from typing import Dict, Generic, List, TypedDict, TypeVar
+from typing import Generic, List, TypedDict, TypeVar
 
 from immukv.types import KeyObjectETag, KeyVersionId, LogVersionId
 
