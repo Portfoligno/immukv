@@ -32,7 +32,6 @@ from immukv.types import KeyObjectETag, KeyVersionId, LogVersionId
 # Import K and V type variables to match client
 K = TypeVar("K", bound=str)
 V = TypeVar("V")
-K_co = TypeVar("K_co", bound=str)  # Covariant K for method-level generics
 
 
 # S3-specific branded types (internal implementation details)
@@ -242,23 +241,23 @@ class _BrandedS3Client:
     def get_object(
         self,
         bucket: str,
-        key: "_S3KeyPath[K_co]",
+        key: "_S3KeyPath[K]",
         version_id: Optional[str] = None,
-    ) -> "_S3GetObjectResponse[K_co]": ...
+    ) -> "_S3GetObjectResponse[K]": ...
 
     def get_object(
         self,
         bucket: str,
-        key: "_S3KeyPath[K_co]",
+        key: "_S3KeyPath[K]",
         version_id: Optional[str] = None,
-    ) -> "_S3GetObjectResponse[K_co]":
+    ) -> "_S3GetObjectResponse[K]":
         """Get object from S3."""
         request: GetObjectRequestTypeDef = {"Bucket": bucket, "Key": key}
         if version_id is not None:
             request["VersionId"] = version_id
 
         response = self._s3.get_object(**request)
-        return cast("_S3GetObjectResponse[K_co]", response)
+        return cast("_S3GetObjectResponse[K]", response)
 
     @overload
     def put_object(
@@ -277,26 +276,26 @@ class _BrandedS3Client:
     def put_object(
         self,
         bucket: str,
-        key: "_S3KeyPath[K_co]",
+        key: "_S3KeyPath[K]",
         body: bytes,
         content_type: Optional[str] = None,
         if_match: Optional[str] = None,
         if_none_match: Optional[str] = None,
         server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
         sse_kms_key_id: Optional[str] = None,
-    ) -> "_S3PutObjectResponse[K_co]": ...
+    ) -> "_S3PutObjectResponse[K]": ...
 
     def put_object(
         self,
         bucket: str,
-        key: "_S3KeyPath[K_co]",
+        key: "_S3KeyPath[K]",
         body: bytes,
         content_type: Optional[str] = None,
         if_match: Optional[str] = None,
         if_none_match: Optional[str] = None,
         server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
         sse_kms_key_id: Optional[str] = None,
-    ) -> "_S3PutObjectResponse[K_co]":
+    ) -> "_S3PutObjectResponse[K]":
         """Put object to S3."""
         request: PutObjectRequestTypeDef = {"Bucket": bucket, "Key": key, "Body": body}
         if content_type is not None:
@@ -311,7 +310,7 @@ class _BrandedS3Client:
             request["SSEKMSKeyId"] = sse_kms_key_id
 
         response = self._s3.put_object(**request)
-        return cast("_S3PutObjectResponse[K_co]", response)
+        return cast("_S3PutObjectResponse[K]", response)
 
     @overload
     def head_object(
@@ -324,16 +323,16 @@ class _BrandedS3Client:
     def head_object(
         self,
         bucket: str,
-        key: "_S3KeyPath[K_co]",
-    ) -> "_S3HeadObjectResponse[K_co]": ...
+        key: "_S3KeyPath[K]",
+    ) -> "_S3HeadObjectResponse[K]": ...
 
     def head_object(
         self,
         bucket: str,
-        key: "_S3KeyPath[K_co]",
-    ) -> "_S3HeadObjectResponse[K_co]":
+        key: "_S3KeyPath[K]",
+    ) -> "_S3HeadObjectResponse[K]":
         """Get object metadata from S3."""
-        return cast("_S3HeadObjectResponse[K_co]", self._s3.head_object(Bucket=bucket, Key=key))
+        return cast("_S3HeadObjectResponse[K]", self._s3.head_object(Bucket=bucket, Key=key))
 
     @overload
     def list_object_versions(
@@ -348,18 +347,18 @@ class _BrandedS3Client:
     def list_object_versions(
         self,
         bucket: str,
-        prefix: "_S3KeyPath[K_co]",
-        key_marker: "Optional[_S3KeyPath[K_co]]" = None,
+        prefix: "_S3KeyPath[K]",
+        key_marker: "Optional[_S3KeyPath[K]]" = None,
         version_id_marker: Optional[str] = None,
-    ) -> "_S3ListObjectVersionsPage[K_co]": ...
+    ) -> "_S3ListObjectVersionsPage[K]": ...
 
     def list_object_versions(
         self,
         bucket: str,
-        prefix: "_S3KeyPath[K_co]",
-        key_marker: "Optional[_S3KeyPath[K_co]]" = None,
+        prefix: "_S3KeyPath[K]",
+        key_marker: "Optional[_S3KeyPath[K]]" = None,
         version_id_marker: Optional[str] = None,
-    ) -> "_S3ListObjectVersionsPage[K_co]":
+    ) -> "_S3ListObjectVersionsPage[K]":
         """List object versions."""
         request: ListObjectVersionsRequestTypeDef = {"Bucket": bucket, "Prefix": prefix}
         if key_marker is not None:
@@ -368,7 +367,7 @@ class _BrandedS3Client:
             request["VersionIdMarker"] = version_id_marker
 
         response = self._s3.list_object_versions(**request)
-        return cast("_S3ListObjectVersionsPage[K_co]", response)
+        return cast("_S3ListObjectVersionsPage[K]", response)
 
     def get_paginator(self, operation_name: Literal["list_objects_v2"]) -> ListObjectsV2Paginator:
         """Get paginator for list operations."""
