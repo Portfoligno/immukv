@@ -25,16 +25,16 @@ import {
   timestampNow,
 } from './types';
 import { JSONValue, ValueParser, stringifyCanonical } from './jsonHelpers';
+import { BrandedS3Client } from './internal/s3Client';
+import { readBodyAsJson } from './internal/s3Helpers';
 import {
-  readBodyAsJson,
-  BrandedS3Client,
   HeadObjectCommandOutputs,
   ObjectVersions,
   PutObjectCommandOutputs,
   S3KeyPath,
   S3KeyPaths,
   LogKey,
-} from './s3Helpers';
+} from './internal/s3Types';
 
 /**
  * Main client interface - Simple S3 versioning with auto-repair.

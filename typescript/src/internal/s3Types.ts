@@ -1,16 +1,14 @@
 /**
- * Helper functions for S3 operations.
+ * S3-specific type definitions for internal use.
  *
- * Centralizes type handling for AWS SDK responses to maintain type safety.
+ * These types are not part of the public API and should only be used internally.
  */
 
 import * as s3 from '@aws-sdk/client-s3';
-import { JSONValue } from './jsonHelpers';
-import { LogVersionId, KeyVersionId, KeyObjectETag, brandWithKey } from './types';
+import { LogVersionId, KeyVersionId, KeyObjectETag, brandWithKey } from '../types';
 
 /**
  * Branded type for log keys (constant key type for log file paths).
- * @internal
  */
 export type LogKey = string & {
   readonly __brand: 'LogKey';
@@ -18,7 +16,6 @@ export type LogKey = string & {
 
 /**
  * Branded S3 path string carrying the key type K.
- * @internal
  */
 export type S3KeyPath<K extends string> = string & {
   readonly __brand: 'S3KeyPath';
@@ -27,7 +24,6 @@ export type S3KeyPath<K extends string> = string & {
 
 /**
  * Factory methods for creating S3 key paths.
- * @internal
  */
 export const S3KeyPaths = {
   /**
@@ -46,43 +42,7 @@ export const S3KeyPaths = {
 } as const;
 
 /**
- * Read S3 Body stream and parse as JSON.
- *
- * Centralizes JSON parsing from S3 GetObject responses.
- *
- * @param body - S3 response body stream
- * @returns Parsed JSON object
- * @throws Error if body is undefined or JSON parsing fails
- * @internal
- */
-export async function readBodyAsJson(
-  body: s3.GetObjectCommandOutput['Body']
-): Promise<{ [key: string]: JSONValue }> {
-  if (!body) {
-    throw new Error('S3 response body is undefined');
-  }
-  const bodyString = await body.transformToString();
-  return JSON.parse(bodyString) as { [key: string]: JSONValue };
-}
-
-/**
- * Extract error code from AWS SDK error.
- *
- * Centralizes error code extraction to handle different error formats.
- *
- * @param error - AWS SDK error object
- * @returns Error code string
- * @internal
- */
-export function getErrorCode(error: any): string {
-  return error.name || error.$metadata?.httpStatusCode?.toString() || 'Unknown';
-}
-
-// Branded AWS SDK response types and their helpers
-
-/**
  * Branded GetObjectCommandOutput for nominal typing.
- * @internal
  */
 export type GetObjectCommandOutput<K extends string> = s3.GetObjectCommandOutput & {
   readonly __brand: 'GetObjectCommandOutput';
@@ -91,7 +51,6 @@ export type GetObjectCommandOutput<K extends string> = s3.GetObjectCommandOutput
 
 /**
  * Helper functions for GetObjectCommandOutput.
- * @internal
  */
 export const GetObjectCommandOutputs = {
   /**
@@ -117,7 +76,6 @@ export const GetObjectCommandOutputs = {
 
 /**
  * Branded PutObjectCommandOutput for nominal typing.
- * @internal
  */
 export type PutObjectCommandOutput<K extends string> = s3.PutObjectCommandOutput & {
   readonly __brand: 'PutObjectCommandOutput';
@@ -126,7 +84,6 @@ export type PutObjectCommandOutput<K extends string> = s3.PutObjectCommandOutput
 
 /**
  * Helper functions for PutObjectCommandOutput.
- * @internal
  */
 export const PutObjectCommandOutputs = {
   /**
@@ -152,7 +109,6 @@ export const PutObjectCommandOutputs = {
 
 /**
  * Branded HeadObjectCommandOutput for nominal typing.
- * @internal
  */
 export type HeadObjectCommandOutput<K extends string> = s3.HeadObjectCommandOutput & {
   readonly __brand: 'HeadObjectCommandOutput';
@@ -161,7 +117,6 @@ export type HeadObjectCommandOutput<K extends string> = s3.HeadObjectCommandOutp
 
 /**
  * Helper functions for HeadObjectCommandOutput.
- * @internal
  */
 export const HeadObjectCommandOutputs = {
   /**
@@ -187,7 +142,6 @@ export const HeadObjectCommandOutputs = {
 
 /**
  * Branded ObjectVersion for nominal typing.
- * @internal
  */
 export type ObjectVersion<K extends string> = s3.ObjectVersion & {
   readonly __brand: 'ObjectVersion';
@@ -196,7 +150,6 @@ export type ObjectVersion<K extends string> = s3.ObjectVersion & {
 
 /**
  * Helper functions for ObjectVersion.
- * @internal
  */
 export const ObjectVersions = {
   /**
@@ -217,55 +170,3 @@ export const ObjectVersions = {
       : undefined;
   },
 } as const;
-
-/**
- * Branded S3 client wrapper returning nominally-typed responses.
- * @internal
- */
-export class BrandedS3Client {
-  constructor(private s3: s3.S3Client) {}
-
-  async getObject<K extends string>(
-    params: s3.GetObjectCommandInput & { Key: S3KeyPath<K> }
-  ): Promise<GetObjectCommandOutput<K>> {
-    const response = await this.s3.send(new s3.GetObjectCommand(params));
-    return brandWithKey<s3.GetObjectCommandOutput, 'GetObjectCommandOutput', K>(response);
-  }
-
-  async putObject<K extends string>(
-    params: s3.PutObjectCommandInput & { Key: S3KeyPath<K> }
-  ): Promise<PutObjectCommandOutput<K>> {
-    const response = await this.s3.send(new s3.PutObjectCommand(params));
-    return brandWithKey<s3.PutObjectCommandOutput, 'PutObjectCommandOutput', K>(response);
-  }
-
-  async headObject<K extends string>(
-    params: s3.HeadObjectCommandInput & { Key: S3KeyPath<K> }
-  ): Promise<HeadObjectCommandOutput<K>> {
-    const response = await this.s3.send(new s3.HeadObjectCommand(params));
-    return brandWithKey<s3.HeadObjectCommandOutput, 'HeadObjectCommandOutput', K>(response);
-  }
-
-  async listObjectVersions<K extends string>(
-    params: s3.ListObjectVersionsCommandInput & {
-      Prefix: S3KeyPath<K>;
-      KeyMarker?: S3KeyPath<K>;
-    }
-  ): Promise<{
-    Versions?: ObjectVersion<K>[];
-    IsTruncated?: boolean;
-    NextKeyMarker?: string;
-    NextVersionIdMarker?: string;
-  }> {
-    const response = await this.s3.send(new s3.ListObjectVersionsCommand(params));
-    return {
-      ...response,
-      Versions: response.Versions?.map(v => brandWithKey<s3.ObjectVersion, 'ObjectVersion', K>(v)),
-    };
-  }
-
-  // Direct access to underlying S3Client for operations not wrapped
-  get client(): s3.S3Client {
-    return this.s3;
-  }
-}

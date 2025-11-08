@@ -17,16 +17,15 @@ from immukv.json_helpers import (
     get_int,
     get_str,
 )
-from immukv.s3_wrapper import (
-    _BrandedS3Client,
-    _LogKey,
-    _S3HeadObjectResponses,
-    _S3KeyPath,
-    _S3KeyPaths,
-    _S3ObjectVersions,
-    _S3PutObjectResponses,
-    _get_error_code,
-    _read_body_as_json,
+from immukv._internal.s3_client import BrandedS3Client
+from immukv._internal.s3_helpers import get_error_code, read_body_as_json
+from immukv._internal.s3_types import (
+    LogKey,
+    S3HeadObjectResponses,
+    S3KeyPath,
+    S3KeyPaths,
+    S3ObjectVersions,
+    S3PutObjectResponses,
 )
 from immukv.types import (
     Config,
@@ -68,8 +67,8 @@ class ImmuKVClient(Generic[K, V]):
 
     # Instance field type annotations
     config: Config
-    s3: _BrandedS3Client
-    log_key: _S3KeyPath[_LogKey]
+    s3: BrandedS3Client
+    log_key: S3KeyPath[LogKey]
     value_parser: ValueParser[V]
     _last_repair_check_ms: int
     _can_write: Optional[bool]
@@ -85,8 +84,8 @@ class ImmuKVClient(Generic[K, V]):
         self.config = config
         self.value_parser = value_parser
         raw_s3: S3Client = boto3.client("s3", region_name=config.s3_region)  # type: ignore[assignment]
-        self.s3 = _BrandedS3Client(raw_s3)
-        self.log_key = cast(_S3KeyPath[_LogKey], _S3KeyPaths.for_log(config.s3_prefix))
+        self.s3 = BrandedS3Client(raw_s3)
+        self.log_key = cast(S3KeyPath[LogKey], S3KeyPaths.for_log(config.s3_prefix))
         self._last_repair_check_ms = 0  # In-memory timestamp tracking
         self._can_write: Optional[bool] = None  # Permission cache
         self._latest_orphan_status: Optional[OrphanStatus[K, V]] = None  # Orphan detection cache
@@ -129,13 +128,13 @@ class ImmuKVClient(Generic[K, V]):
             # ===== Write Phase 1: Append to Global Log (with optimistic locking) =====
 
             # Step 1: Get current key object ETag (for storing in log entry)
-            key_path = _S3KeyPaths.for_key(self.config.s3_prefix, key)
+            key_path = S3KeyPaths.for_key(self.config.s3_prefix, key)
             current_key_etag: Optional[KeyObjectETag[K]] = None
             try:
                 current_key = self.s3.head_object(bucket=self.config.s3_bucket, key=key_path)
-                current_key_etag = _S3HeadObjectResponses.key_object_etag(current_key)
+                current_key_etag = S3HeadObjectResponses.key_object_etag(current_key)
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
-                if _get_error_code(e) in ["NoSuchKey", "404"]:
+                if get_error_code(e) in ["NoSuchKey", "404"]:
                     current_key_etag = None
                 else:
                     raise
@@ -189,11 +188,11 @@ class ImmuKVClient(Generic[K, V]):
                         if_none_match="*",
                     )
 
-                new_log_version_id: LogVersionId[K] = _S3PutObjectResponses.log_version_id(response)
+                new_log_version_id: LogVersionId[K] = S3PutObjectResponses.log_version_id(response)
                 break  # ✅ Committed to log! Exit retry loop
 
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
-                if _get_error_code(e) == "PreconditionFailed":
+                if get_error_code(e) == "PreconditionFailed":
                     logger.debug(f"Log write conflict, retry {attempt + 1}/{max_retries}")
                     continue
                 else:
@@ -226,7 +225,7 @@ class ImmuKVClient(Generic[K, V]):
                     content_type="application/json",
                     if_match=current_key_etag,
                 )
-                key_object_etag = _S3PutObjectResponses.key_object_etag(response)
+                key_object_etag = S3PutObjectResponses.key_object_etag(response)
             else:
                 # CREATE new key object - use if_none_match='*'
                 response = self.s3.put_object(
@@ -236,7 +235,7 @@ class ImmuKVClient(Generic[K, V]):
                     content_type="application/json",
                     if_none_match="*",
                 )
-                key_object_etag = _S3PutObjectResponses.key_object_etag(response)
+                key_object_etag = S3PutObjectResponses.key_object_etag(response)
 
         except Exception as e:
             logger.warning(
@@ -282,14 +281,14 @@ class ImmuKVClient(Generic[K, V]):
                 self._last_repair_check_ms = current_time_ms
 
         # Try to read from key object
-        key_path = _S3KeyPaths.for_key(self.config.s3_prefix, key)
+        key_path = S3KeyPaths.for_key(self.config.s3_prefix, key)
         try:
             response = self.s3.get_object(bucket=self.config.s3_bucket, key=key_path)
-            data = _read_body_as_json(response["Body"])
+            data = read_body_as_json(response["Body"])
             return entry_from_key_object(data, self.value_parser)
 
         except ClientError as e:  # type: ignore[misc]
-            if _get_error_code(e) in ["NoSuchKey", "404"]:
+            if get_error_code(e) in ["NoSuchKey", "404"]:
                 # Key object doesn't exist - check for orphan fallback
                 if (
                     self._latest_orphan_status
@@ -311,10 +310,10 @@ class ImmuKVClient(Generic[K, V]):
             response = self.s3.get_object(
                 bucket=self.config.s3_bucket, key=self.log_key, version_id=version_id
             )
-            data = _read_body_as_json(response["Body"])
+            data = read_body_as_json(response["Body"])
             return entry_from_log(data, version_id, self.value_parser)
         except ClientError as e:  # type: ignore[misc]
-            if _get_error_code(e) in ["NoSuchKey", "NoSuchVersion", "404"]:
+            if get_error_code(e) in ["NoSuchKey", "NoSuchVersion", "404"]:
                 raise KeyNotFoundError(f"Log version '{version_id}' not found")
             raise
 
@@ -334,7 +333,7 @@ class ImmuKVClient(Generic[K, V]):
         Returns:
             Tuple of (entries, oldest_key_version_id)
         """
-        key_path = _S3KeyPaths.for_key(self.config.s3_prefix, key)
+        key_path = S3KeyPaths.for_key(self.config.s3_prefix, key)
         entries: List[Entry[K, V]] = []
 
         # Check if we should prepend orphan entry
@@ -376,13 +375,13 @@ class ImmuKVClient(Generic[K, V]):
                         continue
 
                     # Fetch version data
-                    key_version_id: KeyVersionId[K] = _S3ObjectVersions.key_version_id(version)
+                    key_version_id: KeyVersionId[K] = S3ObjectVersions.key_version_id(version)
                     response = self.s3.get_object(
                         bucket=self.config.s3_bucket,
                         key=key_path,
                         version_id=key_version_id,
                     )
-                    data = _read_body_as_json(response["Body"])
+                    data = read_body_as_json(response["Body"])
                     entry: Entry[K, V] = entry_from_key_object(data, self.value_parser)
                     entries.append(entry)
                     last_key_version_id = key_version_id
@@ -399,7 +398,7 @@ class ImmuKVClient(Generic[K, V]):
                 version_id_marker = page.get("NextVersionIdMarker")
 
         except ClientError as e:  # type: ignore[misc]
-            if _get_error_code(e) in ["NoSuchKey", "404"]:
+            if get_error_code(e) in ["NoSuchKey", "404"]:
                 # No key object exists - return orphan if available
                 if prepend_orphan:
                     return (entries, None)
@@ -456,8 +455,8 @@ class ImmuKVClient(Generic[K, V]):
                         key=self.log_key,
                         version_id=version["VersionId"],
                     )
-                    data = _read_body_as_json(response["Body"])
-                    version_id_log: LogVersionId[K] = _S3ObjectVersions.log_version_id(version)
+                    data = read_body_as_json(response["Body"])
+                    version_id_log: LogVersionId[K] = S3ObjectVersions.log_version_id(version)
                     entry: Entry[K, V] = entry_from_log(data, version_id_log, self.value_parser)
                     entries.append(entry)
 
@@ -473,7 +472,7 @@ class ImmuKVClient(Generic[K, V]):
                 version_id_marker = page.get("NextVersionIdMarker")
 
         except ClientError as e:  # type: ignore[misc]
-            if _get_error_code(e) in ["NoSuchKey", "404"]:
+            if get_error_code(e) in ["NoSuchKey", "404"]:
                 return []
             raise
 
@@ -613,7 +612,7 @@ class ImmuKVClient(Generic[K, V]):
             response = self.s3.get_object(bucket=self.config.s3_bucket, key=self.log_key)
             log_etag = cast(str, response["ETag"])
             current_version_id: LogVersionId[K] = LogVersionId(response["VersionId"])
-            data = _read_body_as_json(response["Body"])
+            data = read_body_as_json(response["Body"])
 
             prev_version_id: LogVersionId[K] = current_version_id
             prev_hash: Hash[K] = hash_from_json(get_str(data, "hash"))
@@ -635,7 +634,7 @@ class ImmuKVClient(Generic[K, V]):
             }
 
         except ClientError as e:  # type: ignore[misc]
-            if _get_error_code(e) in ["NoSuchKey", "404"]:
+            if get_error_code(e) in ["NoSuchKey", "404"]:
                 # First entry - use genesis hash
                 return {
                     "log_etag": None,
@@ -663,7 +662,7 @@ class ImmuKVClient(Generic[K, V]):
         # Skip if in read-only mode or we know we can't write
         if self.config.read_only or self._can_write is False:
             # Check if this key object exists
-            key_path = _S3KeyPaths.for_key(self.config.s3_prefix, latest_log.key)
+            key_path = S3KeyPaths.for_key(self.config.s3_prefix, latest_log.key)
             try:
                 self.s3.head_object(bucket=self.config.s3_bucket, key=key_path)
                 # Key object exists - not orphaned
@@ -675,7 +674,7 @@ class ImmuKVClient(Generic[K, V]):
                 }
                 return (self._can_write, orphan_status)
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
-                if _get_error_code(e) in ["NoSuchKey", "404"]:
+                if get_error_code(e) in ["NoSuchKey", "404"]:
                     # Key object missing - orphaned
                     orphan_status = {
                         "is_orphaned": True,
@@ -687,7 +686,7 @@ class ImmuKVClient(Generic[K, V]):
                 raise
 
         current_time_ms = int(time.time() * 1000)
-        key_path = _S3KeyPaths.for_key(self.config.s3_prefix, latest_log.key)
+        key_path = S3KeyPaths.for_key(self.config.s3_prefix, latest_log.key)
 
         # Prepare repair data
         repair_data = {
@@ -732,7 +731,7 @@ class ImmuKVClient(Generic[K, V]):
             return (True, orphan_status)
 
         except ClientError as e:  # type: ignore[misc]
-            error_code = _get_error_code(e)
+            error_code = get_error_code(e)
 
             if error_code == "PreconditionFailed":
                 # Already propagated by another client
