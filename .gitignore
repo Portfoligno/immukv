@@ -9,6 +9,14 @@
 /python/src/immukv/**/__pycache__
 /python/tests/__pycache__
 /python/src/immukv.egg-info
+/python/build
+
+# CDK
+/cdk/node_modules
+/cdk/lib
+/cdk/dist
+/cdk/tsconfig.json
+/cdk/.npmignore
 
 # Project-specific
 /WORKSPACE.md

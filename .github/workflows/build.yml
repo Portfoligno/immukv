@@ -156,9 +156,76 @@ jobs:
             typescript/package.json
             typescript/README.md
 
-  publish-python:
+  cdk:
+    runs-on: ubuntu-latest
+    container:
+      image: node@sha256:9476adc692080f4f3ec3692117fbd3e3359b033da7d6c35f385dbd8c28c13361
+      # node:20-bullseye-slim
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git python3-venv
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        working-directory: cdk
+        run: |
+          npm ci --omit optional
+
+      - name: Build with jsii
+        working-directory: cdk
+        run: |
+          npm run build
+
+      - name: Generate Python bindings
+        working-directory: cdk
+        run: |
+          npm run package:python
+
+      - name: Verify version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: cdk
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          # CDK uses semver format (e.g., 0.1.11-dev.0) which needs special handling
+          # For release tags, we expect the package version without -dev suffix
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Upload npm distribution artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-immukv-npm-dist
+          path: |
+            cdk/lib/
+            cdk/.jsii
+            cdk/package.json
+            cdk/README.md
+
+      - name: Upload Python distribution artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-immukv-python-dist
+          path: cdk/dist/python/
+
+  all-builds:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: python
+    needs: [python, typescript, cdk]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All builds passed
+        run: echo "All build jobs completed successfully"
+
+  publish-python:
+    needs: all-builds
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -174,8 +241,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-typescript:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: typescript
+    needs: all-builds
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -200,3 +266,46 @@ jobs:
       - name: Publish to npm with OIDC
         run: |
           npm publish --access public
+
+  publish-cdk-typescript:
+    needs: all-builds
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-immukv-npm-dist
+          path: .
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@11.5.1
+          npm --version
+
+      - name: Publish to npm with OIDC
+        run: |
+          npm publish --access public
+
+  publish-cdk-python:
+    needs: all-builds
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cdk-immukv-python-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

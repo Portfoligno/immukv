@@ -1,0 +1,9 @@
+{
+  "targets": {
+    "python": {
+      "distName": "cdk-immukv",
+      "module": "cdk_immukv"
+    }
+  }
+}
+

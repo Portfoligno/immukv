@@ -1,0 +1,55 @@
+{
+  "name": "cdk-immukv",
+  "version": "0.1.11-dev.0",
+  "description": "AWS CDK constructs for ImmuKV - Immutable key-value store using S3 versioning",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "jsii": {
+    "outdir": "dist",
+    "targets": {
+      "python": {
+        "distName": "cdk-immukv",
+        "module": "cdk_immukv"
+      }
+    },
+    "tsc": {
+      "outDir": "lib",
+      "rootDir": "src"
+    }
+  },
+  "scripts": {
+    "build": "jsii",
+    "build:watch": "jsii -w",
+    "package": "jsii-pacmak",
+    "package:python": "jsii-pacmak -t python",
+    "clean": "rm -rf lib dist"
+  },
+  "keywords": [
+    "aws",
+    "cdk",
+    "immukv",
+    "s3",
+    "versioning",
+    "infrastructure"
+  ],
+  "author": "ImmuKV Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Portfoligno/immukv.git",
+    "directory": "cdk"
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.0.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "aws-cdk-lib": "^2.0.0",
+    "constructs": "^10.0.0",
+    "jsii": "^5.0.0",
+    "jsii-pacmak": "^1.0.0",
+    "typescript": "^5.2.0"
+  },
+  "stability": "experimental"
+}
+
