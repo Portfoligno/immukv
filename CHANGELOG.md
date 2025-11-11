@@ -5,6 +5,20 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2025-11-11
+
+### Added
+
+- New `cdk-immukv` package: AWS CDK construct library for deploying ImmuKV infrastructure
+  - TypeScript: Published to npm as `cdk-immukv`
+  - Python: Published to PyPI as `cdk-immukv` (auto-generated from TypeScript via jsii)
+  - Provides `ImmuKVStack` construct with configurable S3 bucket, lifecycle rules, and IAM policies
+
+### Changed
+
+- Python: Added `py.typed` marker for PEP 561 type checking support
+- TypeScript: Enabled `declarationMap` for improved IDE navigation and debugging
+
 ## [0.1.10] - 2025-11-08
 
 ### Changed
@@ -90,6 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.11]: https://github.com/Portfoligno/immukv/releases/tag/0.1.11
+[0.1.10]: https://github.com/Portfoligno/immukv/releases/tag/0.1.10
 [0.1.9]: https://github.com/Portfoligno/immukv/releases/tag/0.1.9
 [0.1.8]: https://github.com/Portfoligno/immukv/releases/tag/0.1.8
 [0.1.7]: https://github.com/Portfoligno/immukv/releases/tag/0.1.7
