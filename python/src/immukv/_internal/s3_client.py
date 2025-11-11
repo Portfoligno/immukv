@@ -3,7 +3,7 @@
 This client is not part of the public API and should only be used internally.
 """
 
-from typing import Literal, Optional, TypeVar, cast, overload
+from typing import Literal, Optional, TypeVar, cast
 
 from mypy_boto3_s3.client import S3Client
 from mypy_boto3_s3.paginator import ListObjectsV2Paginator
@@ -14,7 +14,6 @@ from mypy_boto3_s3.type_defs import (
 )
 
 from immukv._internal.s3_types import (
-    LogKey,
     S3GetObjectResponse,
     S3HeadObjectResponse,
     S3KeyPath,
@@ -37,22 +36,6 @@ class BrandedS3Client:
         """Initialize with a boto3 S3 client."""
         self._s3 = s3_client
 
-    @overload
-    def get_object(
-        self,
-        bucket: str,
-        key: S3KeyPath[LogKey],
-        version_id: Optional[str] = None,
-    ) -> "S3GetObjectResponse[LogKey]": ...
-
-    @overload
-    def get_object(
-        self,
-        bucket: str,
-        key: "S3KeyPath[K]",
-        version_id: Optional[str] = None,
-    ) -> "S3GetObjectResponse[K]": ...
-
     def get_object(
         self,
         bucket: str,
@@ -66,32 +49,6 @@ class BrandedS3Client:
 
         response = self._s3.get_object(**request)
         return cast("S3GetObjectResponse[K]", response)
-
-    @overload
-    def put_object(
-        self,
-        bucket: str,
-        key: S3KeyPath[LogKey],
-        body: bytes,
-        content_type: Optional[str] = None,
-        if_match: Optional[str] = None,
-        if_none_match: Optional[str] = None,
-        server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
-        sse_kms_key_id: Optional[str] = None,
-    ) -> "S3PutObjectResponse[LogKey]": ...
-
-    @overload
-    def put_object(
-        self,
-        bucket: str,
-        key: "S3KeyPath[K]",
-        body: bytes,
-        content_type: Optional[str] = None,
-        if_match: Optional[str] = None,
-        if_none_match: Optional[str] = None,
-        server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
-        sse_kms_key_id: Optional[str] = None,
-    ) -> "S3PutObjectResponse[K]": ...
 
     def put_object(
         self,
@@ -120,20 +77,6 @@ class BrandedS3Client:
         response = self._s3.put_object(**request)
         return cast("S3PutObjectResponse[K]", response)
 
-    @overload
-    def head_object(
-        self,
-        bucket: str,
-        key: S3KeyPath[LogKey],
-    ) -> "S3HeadObjectResponse[LogKey]": ...
-
-    @overload
-    def head_object(
-        self,
-        bucket: str,
-        key: "S3KeyPath[K]",
-    ) -> "S3HeadObjectResponse[K]": ...
-
     def head_object(
         self,
         bucket: str,
@@ -141,24 +84,6 @@ class BrandedS3Client:
     ) -> "S3HeadObjectResponse[K]":
         """Get object metadata from S3."""
         return cast("S3HeadObjectResponse[K]", self._s3.head_object(Bucket=bucket, Key=key))
-
-    @overload
-    def list_object_versions(
-        self,
-        bucket: str,
-        prefix: S3KeyPath[LogKey],
-        key_marker: Optional[S3KeyPath[LogKey]] = None,
-        version_id_marker: Optional[str] = None,
-    ) -> "S3ListObjectVersionsPage[LogKey]": ...
-
-    @overload
-    def list_object_versions(
-        self,
-        bucket: str,
-        prefix: "S3KeyPath[K]",
-        key_marker: "Optional[S3KeyPath[K]]" = None,
-        version_id_marker: Optional[str] = None,
-    ) -> "S3ListObjectVersionsPage[K]": ...
 
     def list_object_versions(
         self,
