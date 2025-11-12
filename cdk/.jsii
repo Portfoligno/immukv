@@ -4124,9 +4124,9 @@
     },
     "tscRootDir": "src"
   },
-  "name": "@immukv/cdk",
+  "name": "cdk-immukv",
   "readme": {
-    "markdown": "# @immukv/cdk\n\nAWS CDK constructs for deploying ImmuKV infrastructure.\n\n## Installation\n\n### TypeScript/JavaScript\n\n```bash\nnpm install @immukv/cdk\n```\n\n### Python\n\n```bash\npip install immukv-cdk\n```\n\n## Usage\n\n### TypeScript\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport { ImmuKVStack } from '@immukv/cdk';\n\nconst app = new cdk.App();\nnew ImmuKVStack(app, 'MyImmuKVStack', {\n  bucketName: 'my-immukv-bucket',\n  s3Prefix: 'myapp/',\n});\n```\n\n### Python\n\n```python\nimport aws_cdk as cdk\nfrom immukv_cdk import ImmuKVStack\n\napp = cdk.App()\nImmuKVStack(app, \"MyImmuKVStack\",\n    bucket_name=\"my-immukv-bucket\",\n    s3_prefix=\"myapp/\",\n)\n```\n\n## API\n\nSee the [API documentation](https://github.com/Portfoligno/immukv/tree/main/cdk) for detailed information.\n\n## License\n\nMIT\n\n"
+    "markdown": "# cdk-immukv\n\nAWS CDK constructs for deploying ImmuKV infrastructure.\n\n## Installation\n\n### TypeScript/JavaScript\n\n```bash\nnpm install cdk-immukv\n```\n\n### Python\n\n```bash\npip install cdk-immukv\n```\n\n## Usage\n\n### Basic Setup\n\n#### TypeScript\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  s3Prefix: 'myapp/',\n});\n```\n\n#### Python\n\n```python\nimport aws_cdk as cdk\nfrom cdk_immukv import ImmuKV\n\napp = cdk.App()\nstack = cdk.Stack(app, \"MyStack\")\n\nImmuKV(stack, \"ImmuKV\",\n    bucket_name=\"my-immukv-bucket\",\n    s3_prefix=\"myapp/\",\n)\n```\n\n### S3 Event Notifications\n\nYou can optionally configure S3 event notifications to trigger when log entries are created. This supports Lambda functions, SNS topics, and SQS queues.\n\nAll notification destinations can be configured using the `onLogEntryCreated` property. Destinations can be in the same stack or different stacks - the Construct pattern handles this cleanly.\n\n#### TypeScript - Lambda Trigger\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport * as lambda from 'aws-cdk-lib/aws-lambda';\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\n// Create a Lambda function\nconst processorFn = new lambda.Function(stack, 'LogProcessor', {\n  runtime: lambda.Runtime.PYTHON_3_11,\n  handler: 'index.handler',\n  code: lambda.Code.fromAsset('lambda'),\n});\n\n// Configure ImmuKV to trigger the Lambda on log entry creation\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  onLogEntryCreated: new s3n.LambdaDestination(processorFn),\n});\n```\n\n#### TypeScript - SNS Topic\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport * as sns from 'aws-cdk-lib/aws-sns';\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\n// Create SNS topic\nconst topic = new sns.Topic(stack, 'LogEntryTopic');\n\n// Configure ImmuKV to publish to SNS on log entry creation\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  onLogEntryCreated: new s3n.SnsDestination(topic),\n});\n```\n\n#### TypeScript - SQS Queue\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport * as sqs from 'aws-cdk-lib/aws-sqs';\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\n// Create SQS queue\nconst queue = new sqs.Queue(stack, 'LogEntryQueue');\n\n// Configure ImmuKV to send to SQS on log entry creation\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  onLogEntryCreated: new s3n.SqsDestination(queue),\n});\n```\n\n#### Python - Lambda Trigger\n\n```python\nimport aws_cdk as cdk\nfrom aws_cdk import aws_lambda as lambda_\nfrom aws_cdk.aws_s3_notifications import LambdaDestination\nfrom cdk_immukv import ImmuKV\n\napp = cdk.App()\nstack = cdk.Stack(app, \"MyStack\")\n\n# Create Lambda function\nprocessor_fn = lambda_.Function(stack, \"LogProcessor\",\n    runtime=lambda_.Runtime.PYTHON_3_11,\n    handler=\"index.handler\",\n    code=lambda_.Code.from_asset(\"lambda\"),\n)\n\n# Configure ImmuKV with Lambda trigger\nImmuKV(stack, \"ImmuKV\",\n    bucket_name=\"my-immukv-bucket\",\n    on_log_entry_created=LambdaDestination(processor_fn),\n)\n```\n\n## API\n\nSee the [API documentation](https://github.com/Portfoligno/immukv/tree/main/cdk) for detailed information.\n\n## License\n\nMIT\n\n"
   },
   "repository": {
     "directory": "cdk",
@@ -4136,30 +4136,30 @@
   "schema": "jsii/0.10.0",
   "targets": {
     "js": {
-      "npm": "@immukv/cdk"
+      "npm": "cdk-immukv"
     },
     "python": {
-      "distName": "immukv-cdk",
-      "module": "immukv_cdk"
+      "distName": "cdk-immukv",
+      "module": "cdk_immukv"
     }
   },
   "types": {
-    "@immukv/cdk.ImmuKVStack": {
-      "assembly": "@immukv/cdk",
-      "base": "aws-cdk-lib.Stack",
+    "cdk-immukv.ImmuKV": {
+      "assembly": "cdk-immukv",
+      "base": "constructs.Construct",
       "docs": {
         "remarks": "Creates an S3 bucket with versioning enabled and IAM policies for\nread/write and read-only access.",
         "stability": "experimental",
-        "summary": "AWS CDK Stack for ImmuKV infrastructure."
+        "summary": "AWS CDK Construct for ImmuKV infrastructure."
       },
-      "fqn": "@immukv/cdk.ImmuKVStack",
+      "fqn": "cdk-immukv.ImmuKV",
       "initializer": {
         "docs": {
           "stability": "experimental"
         },
         "locationInModule": {
-          "filename": "src/immukv-stack.ts",
-          "line": 72
+          "filename": "src/immukv.ts",
+          "line": 103
         },
         "parameters": [
           {
@@ -4178,17 +4178,17 @@
             "name": "props",
             "optional": true,
             "type": {
-              "fqn": "@immukv/cdk.ImmuKVStackProps"
+              "fqn": "cdk-immukv.ImmuKVProps"
             }
           }
         ]
       },
       "kind": "class",
       "locationInModule": {
-        "filename": "src/immukv-stack.ts",
-        "line": 56
+        "filename": "src/immukv.ts",
+        "line": 87
       },
-      "name": "ImmuKVStack",
+      "name": "ImmuKV",
       "properties": [
         {
           "docs": {
@@ -4197,8 +4197,8 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
-            "line": 60
+            "filename": "src/immukv.ts",
+            "line": 91
           },
           "name": "bucket",
           "type": {
@@ -4212,8 +4212,8 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
-            "line": 70
+            "filename": "src/immukv.ts",
+            "line": 101
           },
           "name": "readOnlyPolicy",
           "type": {
@@ -4227,8 +4227,8 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
-            "line": 65
+            "filename": "src/immukv.ts",
+            "line": 96
           },
           "name": "readWritePolicy",
           "type": {
@@ -4236,24 +4236,21 @@
           }
         }
       ],
-      "symbolId": "src/immukv-stack:ImmuKVStack"
+      "symbolId": "src/immukv:ImmuKV"
     },
-    "@immukv/cdk.ImmuKVStackProps": {
-      "assembly": "@immukv/cdk",
+    "cdk-immukv.ImmuKVProps": {
+      "assembly": "cdk-immukv",
       "datatype": true,
       "docs": {
         "stability": "experimental"
       },
-      "fqn": "@immukv/cdk.ImmuKVStackProps",
-      "interfaces": [
-        "aws-cdk-lib.StackProps"
-      ],
+      "fqn": "cdk-immukv.ImmuKVProps",
       "kind": "interface",
       "locationInModule": {
-        "filename": "src/immukv-stack.ts",
+        "filename": "src/immukv.ts",
         "line": 6
       },
-      "name": "ImmuKVStackProps",
+      "name": "ImmuKVProps",
       "properties": [
         {
           "abstract": true,
@@ -4264,7 +4261,7 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
+            "filename": "src/immukv.ts",
             "line": 11
           },
           "name": "bucketName",
@@ -4282,7 +4279,7 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
+            "filename": "src/immukv.ts",
             "line": 35
           },
           "name": "keyVersionRetentionDays",
@@ -4300,7 +4297,7 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
+            "filename": "src/immukv.ts",
             "line": 41
           },
           "name": "keyVersionsToRetain",
@@ -4318,7 +4315,7 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
+            "filename": "src/immukv.ts",
             "line": 23
           },
           "name": "logVersionRetentionDays",
@@ -4336,7 +4333,7 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
+            "filename": "src/immukv.ts",
             "line": 29
           },
           "name": "logVersionsToRetain",
@@ -4348,13 +4345,32 @@
         {
           "abstract": true,
           "docs": {
+            "default": "- No event notification configured",
+            "remarks": "Example with Lambda:\n```ts\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\n\nnew ImmuKV(this, 'ImmuKV', {\n  onLogEntryCreated: new s3n.LambdaDestination(myFunction)\n});\n```\n\nExample with SNS:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  onLogEntryCreated: new s3n.SnsDestination(myTopic)\n});\n```\n\nExample with SQS:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  onLogEntryCreated: new s3n.SqsDestination(myQueue)\n});\n```",
+            "stability": "experimental",
+            "summary": "Optional notification destination to trigger when log entries are created. Supports Lambda functions, SNS topics, and SQS queues."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 78
+          },
+          "name": "onLogEntryCreated",
+          "optional": true,
+          "type": {
+            "fqn": "aws-cdk-lib.aws_s3.IBucketNotificationDestination"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
             "default": "- No prefix (root of bucket)",
             "stability": "experimental",
             "summary": "S3 prefix for all ImmuKV objects."
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
+            "filename": "src/immukv.ts",
             "line": 17
           },
           "name": "s3Prefix",
@@ -4372,7 +4388,7 @@
           },
           "immutable": true,
           "locationInModule": {
-            "filename": "src/immukv-stack.ts",
+            "filename": "src/immukv.ts",
             "line": 47
           },
           "name": "useKmsEncryption",
@@ -4382,9 +4398,9 @@
           }
         }
       ],
-      "symbolId": "src/immukv-stack:ImmuKVStackProps"
+      "symbolId": "src/immukv:ImmuKVProps"
     }
   },
-  "version": "0.1.11-dev.0",
-  "fingerprint": "vkwY7Ffd75oPHdsXdVy2UrbeK3qyGjzN7FDRNzL9ZJg="
+  "version": "0.1.12-dev.0",
+  "fingerprint": "/WCcHlnUs1ShX0hzMSzFAHEYx/Jk8sgh/8DB6aWgS2g="
 }

@@ -46,12 +46,12 @@ jobs:
         run: |
           ruff check src/immukv
 
-      - name: Format check with black
+      - name: Check format with black
         working-directory: python
         run: |
           black --check src/immukv
 
-      - name: Run tests
+      - name: Run Python tests with pytest
         working-directory: python
         run: |
           pytest tests/ -v
@@ -68,14 +68,14 @@ jobs:
             exit 1
           fi
 
-      - name: Build distribution packages
+      - name: Build Python distribution packages
         if: startsWith(github.ref, 'refs/tags/')
         working-directory: python
         run: |
           pip install --no-cache-dir build
           python -m build
 
-      - name: Upload distribution artifacts
+      - name: Upload Python distribution artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
@@ -105,32 +105,32 @@ jobs:
           # Verify substitution succeeded (fails if exact line doesn't match)
           grep -Fx "export const VERSION = '$PACKAGE_VERSION';" src/index.ts
 
-      - name: Install dependencies
+      - name: Install TypeScript dependencies
         working-directory: typescript
         run: |
           npm ci --omit optional
 
-      - name: Build
+      - name: Build TypeScript with tsc
         working-directory: typescript
         run: |
           npm run build
 
-      - name: Type check
+      - name: Type check with tsc
         working-directory: typescript
         run: |
           npm run type-check
 
-      - name: Lint
+      - name: Lint with oxlint and eslint
         working-directory: typescript
         run: |
           npm run lint
 
-      - name: Format check
+      - name: Check format with prettier
         working-directory: typescript
         run: |
           npx prettier --check "src/**/*.ts"
 
-      - name: Run tests
+      - name: Run TypeScript tests with jest
         working-directory: typescript
         run: |
           npm test
@@ -146,7 +146,7 @@ jobs:
             exit 1
           fi
 
-      - name: Upload distribution artifacts
+      - name: Upload TypeScript distribution artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
@@ -170,17 +170,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install CDK dependencies
         working-directory: cdk
         run: |
           npm ci --omit optional
 
-      - name: Build with jsii
+      - name: Build CDK with jsii
         working-directory: cdk
         run: |
           npm run build
 
-      - name: Generate Python bindings
+      - name: Run CDK tests with jest
+        working-directory: cdk
+        run: |
+          npm test
+
+      - name: Generate Python bindings with jsii-pacmak
         working-directory: cdk
         run: |
           npm run package:python
@@ -198,25 +203,25 @@ jobs:
             exit 1
           fi
 
-      - name: Upload npm distribution artifacts
+      - name: Upload CDK TypeScript distribution artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: cdk-immukv-npm-dist
+          name: cdk-typescript-dist
           path: |
             cdk/lib/
             cdk/.jsii
             cdk/package.json
             cdk/README.md
 
-      - name: Upload Python distribution artifacts
+      - name: Upload CDK Python distribution artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: cdk-immukv-python-dist
+          name: cdk-python-dist
           path: cdk/dist/python/
 
-  all-builds:
+  ready-to-publish:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [python, typescript, cdk]
     runs-on: ubuntu-latest
@@ -225,7 +230,7 @@ jobs:
         run: echo "All build jobs completed successfully"
 
   publish-python:
-    needs: all-builds
+    needs: ready-to-publish
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -241,7 +246,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-typescript:
-    needs: all-builds
+    needs: ready-to-publish
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -268,7 +273,7 @@ jobs:
           npm publish --access public
 
   publish-cdk-typescript:
-    needs: all-builds
+    needs: ready-to-publish
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -277,7 +282,7 @@ jobs:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v4
         with:
-          name: cdk-immukv-npm-dist
+          name: cdk-typescript-dist
           path: .
 
       - name: Setup Node.js
@@ -295,7 +300,7 @@ jobs:
           npm publish --access public
 
   publish-cdk-python:
-    needs: all-builds
+    needs: ready-to-publish
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -304,7 +309,7 @@ jobs:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v4
         with:
-          name: cdk-immukv-python-dist
+          name: cdk-python-dist
           path: dist/
 
       - name: Publish to PyPI
