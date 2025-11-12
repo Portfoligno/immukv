@@ -5,6 +5,31 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2025-11-12
+
+### Changed
+
+- **BREAKING** (CDK): Refactored from Stack to Construct pattern
+  - `ImmuKVStack` → `ImmuKV` (now extends `Construct` instead of `Stack`)
+  - `ImmuKVStackProps` → `ImmuKVProps` (no longer extends `StackProps`)
+  - Retention parameters now accept `cdk.Duration` instead of number
+    - `logVersionRetentionDays` → `logVersionRetention` (Duration)
+    - `keyVersionRetentionDays` → `keyVersionRetention` (Duration)
+  - Default retention changed from limited to unlimited (preserves immutability)
+  - Retention parameters are now fully independent (days OR count, not both required)
+- Python: Internal refactoring - removed redundant type overloads in `BrandedS3Client`
+
+### Added
+
+- CDK: S3 event notifications support via `onLogEntryCreated` property
+  - Supports Lambda functions, SNS topics, and SQS queues
+- CDK: Comprehensive test suite with 44 tests using Jest
+- CDK: Input validation for retention parameters and S3 prefix
+
+### Fixed
+
+- CDK: Stricter input validation (rejects path traversal, fractional days)
+
 ## [0.1.11] - 2025-11-11
 
 ### Added
@@ -104,6 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.12]: https://github.com/Portfoligno/immukv/releases/tag/0.1.12
 [0.1.11]: https://github.com/Portfoligno/immukv/releases/tag/0.1.11
 [0.1.10]: https://github.com/Portfoligno/immukv/releases/tag/0.1.10
 [0.1.9]: https://github.com/Portfoligno/immukv/releases/tag/0.1.9
