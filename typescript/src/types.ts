@@ -66,6 +66,18 @@ export interface Config {
   repairCheckIntervalMs?: number;
   /** Read-only mode - disables all repair attempts (default: false) */
   readOnly?: boolean;
+  /** Override default S3 client behavior (for MinIO in production, or testing with LocalStack/moto) */
+  overrides?: {
+    /** Custom S3 endpoint URL */
+    endpointUrl?: string;
+    /** Explicit credentials (not needed for AWS with IAM roles) */
+    credentials?: {
+      accessKeyId: string;
+      secretAccessKey: string;
+    };
+    /** Use path-style URLs instead of virtual-hosted style (required for MinIO) */
+    forcePathStyle?: boolean;
+  };
 }
 
 /**

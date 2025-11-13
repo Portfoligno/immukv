@@ -1,188 +1,120 @@
 /**
- * Tests for ImmuKV client - Simple S3 versioning implementation.
+ * Integration tests for ImmuKV client using LocalStack.
+ *
+ * These tests require LocalStack running and test actual S3 operations.
+ * Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:4566 npm test
  */
 
 import {
   S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
+  CreateBucketCommand,
+  PutBucketVersioningCommand,
   ListObjectVersionsCommand,
-  ListObjectsV2Command,
+  DeleteObjectCommand,
+  DeleteBucketCommand,
 } from '@aws-sdk/client-s3';
-import { mockClient } from 'aws-sdk-client-mock';
+import { v4 as uuidv4 } from 'uuid';
 import { ImmuKVClient } from '../src/client';
 import { Config, KeyNotFoundError } from '../src/types';
 import { JSONValue, ValueParser } from '../src/jsonHelpers';
-const s3Mock = mockClient(S3Client);
+
+const integrationTestEnabled = process.env.IMMUKV_INTEGRATION_TEST === 'true';
 
 // Identity parser for tests (value is any, so just pass through)
 const identityParser: ValueParser<any> = (value: JSONValue) => value;
 
-// Mock Body type matching AWS SDK's SdkStreamMixin interface
-interface MockBody {
-  transformToString(): Promise<string>;
-}
-
-// Helper to create a mock Body object with transformToString method
-function createMockBody(data: string): MockBody {
-  return {
-    transformToString: async () => data,
-  };
-}
-
 describe('ImmuKVClient', () => {
+  let s3Client: S3Client;
+  let bucketName: string;
   let client: ImmuKVClient;
   let config: Config;
 
-  // Mock storage to simulate S3 versioning
-  const mockStorage: Map<
-    string,
-    { versions: Array<{ versionId: string; data: string; etag: string }> }
-  > = new Map();
-  let versionCounter = 1;
+  if (!integrationTestEnabled) {
+    test.skip('Integration tests require IMMUKV_INTEGRATION_TEST=true', () => {});
+    return;
+  }
 
-  beforeEach(() => {
-    s3Mock.reset();
-    mockStorage.clear();
-    versionCounter = 1;
+  beforeEach(async () => {
+    // Create unique bucket per test for complete isolation
+    bucketName = `test-immukv-${uuidv4().substring(0, 8)}`;
+
+    const endpointUrl = process.env.IMMUKV_S3_ENDPOINT || 'http://localhost:4566';
+    // Use environment variables if set, otherwise default to test credentials
+    const accessKeyId = process.env.AWS_ACCESS_KEY_ID || 'test';
+    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || 'test';
+
+    s3Client = new S3Client({
+      region: 'us-east-1',
+      endpoint: endpointUrl,
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
+      forcePathStyle: true,
+    });
+
+    await s3Client.send(new CreateBucketCommand({ Bucket: bucketName }));
+    await s3Client.send(
+      new PutBucketVersioningCommand({
+        Bucket: bucketName,
+        VersioningConfiguration: { Status: 'Enabled' },
+      })
+    );
 
     config = {
-      s3Bucket: 'test-bucket',
+      s3Bucket: bucketName,
       s3Region: 'us-east-1',
       s3Prefix: 'test/',
       repairCheckIntervalMs: 1000,
+      overrides: {
+        endpointUrl,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+        forcePathStyle: true,
+      },
     };
-
-    // Setup S3 mock responses
-    setupMockS3();
 
     client = new ImmuKVClient(config, identityParser);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     client.close();
+
+    // Cleanup: delete all versions then bucket
+    try {
+      const versionsResponse = await s3Client.send(
+        new ListObjectVersionsCommand({ Bucket: bucketName })
+      );
+
+      // Delete all versions
+      for (const version of versionsResponse.Versions || []) {
+        await s3Client.send(
+          new DeleteObjectCommand({
+            Bucket: bucketName,
+            Key: version.Key!,
+            VersionId: version.VersionId!,
+          })
+        );
+      }
+
+      // Delete all delete markers
+      for (const marker of versionsResponse.DeleteMarkers || []) {
+        await s3Client.send(
+          new DeleteObjectCommand({
+            Bucket: bucketName,
+            Key: marker.Key!,
+            VersionId: marker.VersionId!,
+          })
+        );
+      }
+
+      await s3Client.send(new DeleteBucketCommand({ Bucket: bucketName }));
+    } catch (e) {
+      console.warn(`Cleanup warning for bucket ${bucketName}:`, e);
+    }
   });
-
-  function setupMockS3() {
-    // Mock PutObject - simulates writing with versioning
-    s3Mock.on(PutObjectCommand).callsFake(params => {
-      const key = params.Key!;
-      const body = params.Body as string;
-      const versionId = `v${versionCounter++}`;
-      const etag = `"etag-${versionId}"`;
-
-      if (!mockStorage.has(key)) {
-        mockStorage.set(key, { versions: [] });
-      }
-
-      const storage = mockStorage.get(key)!;
-
-      // Check IfMatch/IfNoneMatch conditions
-      if (params.IfMatch) {
-        const latestVersion = storage.versions[storage.versions.length - 1];
-        if (!latestVersion || latestVersion.etag !== params.IfMatch) {
-          throw { name: 'PreconditionFailed', $metadata: { httpStatusCode: 412 } };
-        }
-      }
-
-      if (params.IfNoneMatch === '*') {
-        if (storage.versions.length > 0) {
-          throw { name: 'PreconditionFailed', $metadata: { httpStatusCode: 412 } };
-        }
-      }
-
-      storage.versions.push({ versionId, data: body, etag });
-
-      return Promise.resolve({ VersionId: versionId, ETag: etag });
-    });
-
-    // Mock GetObject - retrieves specific version or latest
-    s3Mock.on(GetObjectCommand).callsFake(params => {
-      const key = params.Key!;
-      const storage = mockStorage.get(key);
-
-      if (!storage || storage.versions.length === 0) {
-        throw { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } };
-      }
-
-      let version;
-      if (params.VersionId) {
-        version = storage.versions.find(v => v.versionId === params.VersionId);
-        if (!version) {
-          throw { name: 'NoSuchVersion', $metadata: { httpStatusCode: 404 } };
-        }
-      } else {
-        version = storage.versions[storage.versions.length - 1];
-      }
-
-      return Promise.resolve({
-        Body: createMockBody(version.data),
-        VersionId: version.versionId,
-        ETag: version.etag,
-      });
-    });
-
-    // Mock HeadObject - gets metadata
-    s3Mock.on(HeadObjectCommand).callsFake(params => {
-      const key = params.Key!;
-      const storage = mockStorage.get(key);
-
-      if (!storage || storage.versions.length === 0) {
-        throw { name: 'NotFound', $metadata: { httpStatusCode: 404 } };
-      }
-
-      const version = storage.versions[storage.versions.length - 1];
-      return Promise.resolve({
-        VersionId: version.versionId,
-        ETag: version.etag,
-      });
-    });
-
-    // Mock ListObjectVersions - lists all versions
-    s3Mock.on(ListObjectVersionsCommand).callsFake(params => {
-      const prefix = params.Prefix!;
-      const storage = mockStorage.get(prefix);
-
-      if (!storage || storage.versions.length === 0) {
-        return Promise.resolve({ Versions: [] });
-      }
-
-      const versions = storage.versions.map(v => ({
-        Key: prefix,
-        VersionId: v.versionId,
-        IsLatest: v === storage.versions[storage.versions.length - 1],
-        ETag: v.etag,
-      }));
-
-      // Return in reverse order (newest first)
-      return Promise.resolve({ Versions: versions.reverse(), IsTruncated: false });
-    });
-
-    // Mock ListObjectsV2 - lists keys
-    s3Mock.on(ListObjectsV2Command).callsFake(params => {
-      const prefix = params.Prefix || '';
-      const startAfter = params.StartAfter;
-      const contents: Array<{ Key: string }> = [];
-
-      for (const [key] of mockStorage) {
-        if (key.startsWith(prefix)) {
-          contents.push({ Key: key });
-        }
-      }
-
-      // Sort lexicographically
-      contents.sort((a, b) => a.Key!.localeCompare(b.Key!));
-
-      // Filter by StartAfter if provided
-      let filteredContents = contents;
-      if (startAfter) {
-        filteredContents = contents.filter(item => item.Key! > startAfter);
-      }
-
-      return Promise.resolve({ Contents: filteredContents, IsTruncated: false });
-    });
-  }
 
   describe('Basic Operations', () => {
     test('set and get single entry', async () => {
@@ -469,6 +401,35 @@ describe('ImmuKVClient', () => {
       expect(entry.value).toEqual({ value: 'data' });
 
       roClient.close();
+    });
+  });
+
+  describe('Custom Endpoint URL', () => {
+    test('accepts overrides for S3-compatible services', () => {
+      const customConfig: Config = {
+        s3Bucket: 'test-bucket',
+        s3Region: 'us-east-1',
+        s3Prefix: 'test/',
+        overrides: {
+          endpointUrl: 'http://localhost:4566',
+        },
+      };
+
+      // Should not throw when creating client with overrides
+      const customClient = new ImmuKVClient(customConfig, identityParser);
+      customClient.close();
+    });
+
+    test('works without overrides for AWS S3', () => {
+      const defaultConfig: Config = {
+        s3Bucket: 'test-bucket',
+        s3Region: 'us-east-1',
+        s3Prefix: 'test/',
+      };
+
+      // Should not throw when creating client without overrides
+      const defaultClient = new ImmuKVClient(defaultConfig, identityParser);
+      defaultClient.close();
     });
   });
 });

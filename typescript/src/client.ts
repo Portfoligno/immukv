@@ -54,7 +54,14 @@ export class ImmuKVClient<K extends string = string, V = any> {
       readOnly: false,
       ...config,
     };
-    this.s3 = new BrandedS3Client(new s3.S3Client({ region: config.s3Region }));
+    this.s3 = new BrandedS3Client(
+      new s3.S3Client({
+        region: config.s3Region,
+        endpoint: config.overrides?.endpointUrl,
+        credentials: config.overrides?.credentials,
+        forcePathStyle: config.overrides?.forcePathStyle,
+      })
+    );
     this.logKey = S3KeyPaths.forLog(config.s3Prefix);
     this.valueParser = valueParser;
   }
@@ -120,7 +127,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         previous_version_id: prevVersionId,
         previous_hash: prevHash,
         hash: entryHash,
-        previous_key_object_etag: currentKeyEtag,
+        previous_key_object_etag: currentKeyEtag ?? null,
       };
 
       try {
@@ -316,7 +323,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const response = await this.s3.listObjectVersions({
           Bucket: this.config.s3Bucket,
           Prefix: keyPath,
-          KeyMarker: keyPath,
+          KeyMarker: versionIdMarker ? keyPath : undefined,
           VersionIdMarker: versionIdMarker,
         });
 
@@ -395,7 +402,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const response = await this.s3.listObjectVersions({
           Bucket: this.config.s3Bucket,
           Prefix: this.logKey,
-          KeyMarker: this.logKey,
+          KeyMarker: versionIdMarker ? this.logKey : undefined,
           VersionIdMarker: versionIdMarker,
         });
 

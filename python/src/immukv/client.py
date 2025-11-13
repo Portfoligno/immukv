@@ -83,7 +83,23 @@ class ImmuKVClient(Generic[K, V]):
         """
         self.config = config
         self.value_parser = value_parser
-        raw_s3: S3Client = boto3.client("s3", region_name=config.s3_region)  # type: ignore[assignment]
+
+        # Build boto3 client parameters
+        client_params: dict[str, object] = {
+            "region_name": config.s3_region,
+        }
+
+        if config.overrides:
+            if config.overrides.endpoint_url:
+                client_params["endpoint_url"] = config.overrides.endpoint_url
+            if config.overrides.credentials:
+                client_params["aws_access_key_id"] = config.overrides.credentials.aws_access_key_id
+                client_params["aws_secret_access_key"] = config.overrides.credentials.aws_secret_access_key
+            if config.overrides.force_path_style:
+                from botocore.config import Config as BotocoreConfig
+                client_params["config"] = BotocoreConfig(s3={"addressing_style": "path"})
+
+        raw_s3: S3Client = boto3.client("s3", **client_params)  # type: ignore[assignment,call-overload]
         self.s3 = BrandedS3Client(raw_s3)
         self.log_key = cast(S3KeyPath[LogKey], S3KeyPaths.for_log(config.s3_prefix))
         self._last_repair_check_ms = 0  # In-memory timestamp tracking

@@ -1,42 +1,115 @@
-"""Tests for ImmuKV client - Simple S3 versioning implementation."""
+"""Integration tests for ImmuKV client using LocalStack.
 
+These tests require LocalStack running and test actual S3 operations.
+Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:4566 pytest
+"""
+
+import os
+import uuid
 from typing import Generator
-import pytest
+
 import boto3
-from moto import mock_aws
-from immukv import ImmuKVClient, Config, ValueParser
+import pytest
+from mypy_boto3_s3.client import S3Client
+
+from immukv import Config, ImmuKVClient
+from immukv._internal.s3_client import BrandedS3Client
 from immukv.json_helpers import JSONValue
+from immukv.types import S3Credentials, S3Overrides
 
 
-# Identity parser for tests (value is object, so just pass through)
+# Skip if not in integration test mode
+pytestmark = pytest.mark.skipif(
+    os.getenv("IMMUKV_INTEGRATION_TEST") != "true",
+    reason="Integration tests require IMMUKV_INTEGRATION_TEST=true",
+)
+
+
 def identity_parser(value: JSONValue) -> object:
     """Identity parser that returns the JSONValue as-is."""
     return value
 
 
+@pytest.fixture(scope="session")  # type: ignore[misc]
+def raw_s3() -> S3Client:
+    """Create raw S3 client for bucket management operations."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:4566")
+    # Use environment variables if set, otherwise default to test credentials
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+    return boto3.client(  # type: ignore[return-value]
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="us-east-1",
+    )
+
+
+@pytest.fixture(scope="session")  # type: ignore[misc]
+def s3_client(raw_s3: S3Client) -> BrandedS3Client:
+    """Create branded S3 client for type-safe operations."""
+    return BrandedS3Client(raw_s3)
+
+
 @pytest.fixture  # type: ignore[misc]
-def s3_bucket() -> Generator[str, None, None]:
-    """Create a mock S3 bucket for testing."""
-    with mock_aws():  # type: ignore[misc]
-        # Create S3 client and bucket
-        s3 = boto3.client("s3", region_name="us-east-1")  # type: ignore[misc]
-        bucket_name = "test-immukv-bucket"
-        s3.create_bucket(Bucket=bucket_name)  # type: ignore[misc]
+def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
+    """Create unique S3 bucket for each test - ensures complete isolation."""
+    bucket_name = f"test-immukv-{uuid.uuid4().hex[:8]}"
 
-        # Enable versioning on the bucket
-        s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})  # type: ignore[misc]
+    # Create bucket
+    raw_s3.create_bucket(Bucket=bucket_name)
 
-        yield bucket_name
+    # Enable versioning
+    raw_s3.put_bucket_versioning(
+        Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"}
+    )
+
+    yield bucket_name
+
+    # Cleanup: Delete all versions, delete markers, then bucket
+    try:
+        response = raw_s3.list_object_versions(Bucket=bucket_name)
+
+        # Delete all versions
+        for version in response.get("Versions", []):
+            raw_s3.delete_object(
+                Bucket=bucket_name, Key=version["Key"], VersionId=version["VersionId"]
+            )
+
+        # Delete all delete markers
+        for marker in response.get("DeleteMarkers", []):
+            raw_s3.delete_object(
+                Bucket=bucket_name, Key=marker["Key"], VersionId=marker["VersionId"]
+            )
+
+        # Delete bucket
+        raw_s3.delete_bucket(Bucket=bucket_name)
+    except Exception as e:
+        # Best effort cleanup - don't fail tests if cleanup fails
+        print(f"Warning: Cleanup failed for bucket {bucket_name}: {e}")
 
 
 @pytest.fixture  # type: ignore[misc]
 def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
-    """Create an ImmuKV client with mock S3."""
+    """Create ImmuKV client connected to LocalStack."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:4566")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
     config = Config(
         s3_bucket=s3_bucket,
         s3_region="us-east-1",
         s3_prefix="test/",
-        repair_check_interval_ms=1000,  # Short interval for testing
+        repair_check_interval_ms=1000,
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=S3Credentials(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+            ),
+            force_path_style=True,
+        ),
     )
 
     client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
@@ -356,6 +429,7 @@ def test_read_only_mode(client: ImmuKVClient[str, object]) -> None:
         s3_region=client.config.s3_region,
         s3_prefix=client.config.s3_prefix,
         read_only=True,
+        overrides=client.config.overrides,
     )
 
     ro_client: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
@@ -366,3 +440,39 @@ def test_read_only_mode(client: ImmuKVClient[str, object]) -> None:
 
         # Write should fail (implementation detail - may raise or handle differently)
         # For now, just verify read works
+
+
+def test_custom_endpoint_url_config(s3_bucket: str) -> None:
+    """Test that overrides can be specified for S3-compatible services."""
+    # Config with overrides should be accepted
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test/",
+        overrides=S3Overrides(endpoint_url="http://localhost:4566"),
+    )
+
+    # Client creation should succeed
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
+
+    # Verify overrides are stored in config
+    assert client_instance.config.overrides is not None
+    assert client_instance.config.overrides.endpoint_url == "http://localhost:4566"
+
+    # Note: Actual operations would require LocalStack/MinIO/moto running at that endpoint.
+    # This test verifies the config accepts and stores the overrides correctly.
+
+
+def test_default_overrides_is_none(s3_bucket: str) -> None:
+    """Test that overrides defaults to None for AWS S3."""
+    # Config without overrides specified
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test/",
+    )
+
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
+
+    # Should default to None (uses AWS S3)
+    assert client_instance.config.overrides is None

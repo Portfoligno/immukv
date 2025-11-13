@@ -51,10 +51,10 @@ jobs:
         run: |
           black --check src/immukv
 
-      - name: Run Python tests with pytest
+      - name: Run Python unit tests with pytest
         working-directory: python
         run: |
-          pytest tests/ -v
+          pytest tests/test_unit.py -v
 
       - name: Verify version matches tag
         if: startsWith(github.ref, 'refs/tags/')
@@ -130,7 +130,7 @@ jobs:
         run: |
           npx prettier --check "src/**/*.ts"
 
-      - name: Run TypeScript tests with jest
+      - name: Run TypeScript unit tests with jest
         working-directory: typescript
         run: |
           npm test
@@ -155,6 +155,121 @@ jobs:
             typescript/dist/
             typescript/package.json
             typescript/README.md
+
+  python-integration:
+    runs-on: ubuntu-latest
+    container:
+      image: python@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db
+      # python:3.12-slim-bullseye
+
+    services:
+      minio:
+        image: docker.io/bitnamilegacy/minio@sha256:b3d51900e846b92f7503ca6be07d2e8c56ebb6a13a60bc71b8777c716c074bcf
+        # bitnamilegacy/minio:latest (amd64 for GitHub Actions x86-64 runners)
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git curl
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute version placeholder
+        working-directory: python
+        run: |
+          pip install --no-cache-dir tomli
+          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/immukv/__init__.py
+          echo "Substituted version: $PACKAGE_VERSION"
+          grep -Fx "__version__ = \"$PACKAGE_VERSION\"" src/immukv/__init__.py
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+
+      - name: Wait for MinIO to be ready
+        run: |
+          until curl -sf http://minio:9000/minio/health/live; do
+            echo "Waiting for MinIO..."
+            sleep 2
+          done
+          echo "MinIO is ready!"
+
+      - name: Run integration tests against MinIO
+        working-directory: python
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+          IMMUKV_INTEGRATION_TEST: "true"
+          IMMUKV_S3_ENDPOINT: "http://minio:9000"
+        run: |
+          pytest tests/test_client.py tests/test_integration.py -v -s
+
+  typescript-integration:
+    runs-on: ubuntu-latest
+    container:
+      image: node@sha256:d69fb189fa7765636655db043a6a9e6be5ddf94bd1a8dc33fd0bcf4664606a9e
+      # node:18-bullseye-slim
+
+    services:
+      minio:
+        image: docker.io/bitnamilegacy/minio@sha256:b3d51900e846b92f7503ca6be07d2e8c56ebb6a13a60bc71b8777c716c074bcf
+        # bitnamilegacy/minio:latest (amd64 for GitHub Actions x86-64 runners)
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git curl
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute version placeholder
+        working-directory: typescript
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/index.ts
+          echo "Substituted version: $PACKAGE_VERSION"
+          grep -Fx "export const VERSION = '$PACKAGE_VERSION';" src/index.ts
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: |
+          npm ci --omit optional
+
+      - name: Wait for MinIO to be ready
+        run: |
+          until curl -sf http://minio:9000/minio/health/live; do
+            echo "Waiting for MinIO..."
+            sleep 2
+          done
+          echo "MinIO is ready!"
+
+      - name: Run integration tests against MinIO
+        working-directory: typescript
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+          IMMUKV_INTEGRATION_TEST: "true"
+          IMMUKV_S3_ENDPOINT: "http://minio:9000"
+        run: |
+          npm run test:client && npm run test:integration
 
   cdk:
     runs-on: ubuntu-latest
@@ -223,11 +338,11 @@ jobs:
 
   ready-to-publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [python, typescript, cdk]
+    needs: [python, typescript, cdk, python-integration, typescript-integration]
     runs-on: ubuntu-latest
     steps:
-      - name: All builds passed
-        run: echo "All build jobs completed successfully"
+      - name: All builds and integration tests passed
+        run: echo "All build jobs and integration tests completed successfully"
 
   publish-python:
     needs: ready-to-publish

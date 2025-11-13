@@ -172,6 +172,28 @@ def timestamp_from_json(n: int) -> TimestampMs[K]:
 
 
 @dataclass
+class S3Credentials:
+    """Explicit credentials for S3 authentication."""
+
+    aws_access_key_id: str
+    aws_secret_access_key: str
+
+
+@dataclass
+class S3Overrides:
+    """Override default S3 client behavior (for MinIO in production, or testing with LocalStack/moto)."""
+
+    # Custom S3 endpoint URL
+    endpoint_url: Optional[str] = None
+
+    # Explicit credentials (not needed for AWS with IAM roles)
+    credentials: Optional[S3Credentials] = None
+
+    # Use path-style URLs instead of virtual-hosted style (required for MinIO)
+    force_path_style: bool = False
+
+
+@dataclass
 class Config:
     """Client configuration."""
 
@@ -188,6 +210,9 @@ class Config:
 
     # Optional: read-only mode (disables all repair attempts)
     read_only: bool = False  # If True, never attempt to write key objects
+
+    # Optional: override default S3 client behavior
+    overrides: Optional[S3Overrides] = None
 
 
 class LogEntryForHash(TypedDict, Generic[K, V]):
