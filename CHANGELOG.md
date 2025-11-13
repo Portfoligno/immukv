@@ -5,6 +5,35 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.13] - 2025-11-14
+
+### Added
+
+- Python: Support for S3-compatible services via `overrides` field in Config
+  - `S3Overrides` dataclass with `endpoint_url`, `credentials`, and `force_path_style` options
+  - Enables usage with MinIO, LocalStack, and other S3-compatible services
+- TypeScript: Support for S3-compatible services via `overrides` field in Config
+  - Interface with `endpointUrl`, `credentials`, and `forcePathStyle` options
+- Python: Comprehensive integration test suite using MinIO (9 tests)
+  - Tests real S3 versioning, ETags, conditional writes, and object structure
+- TypeScript: Comprehensive integration test suite using MinIO (9 tests)
+- Python: Separate unit test suite (14 tests) for pure logic testing
+- TypeScript: Separate unit test suite (14 tests) for pure logic testing
+- CI: Integration test jobs in GitHub Actions using MinIO service containers
+
+### Fixed
+
+- TypeScript: `history()` method now returns correct results (previously returned empty due to incorrect pagination parameters)
+- TypeScript: `logEntries()` method now returns correct results (previously returned empty due to incorrect pagination parameters)
+- TypeScript: Log entry JSON serialization now uses `null` instead of `undefined` for `previous_key_object_etag` field
+
+### Changed
+
+- Python: Removed `moto[s3]` dependency in favor of real S3 integration tests
+- TypeScript: Removed `aws-sdk-client-mock` dependency in favor of real S3 integration tests
+- CI: Split tests into unit and integration categories
+- CI: Integration tests now required to pass before publishing
+
 ## [0.1.12] - 2025-11-12
 
 ### Changed
@@ -129,6 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.13]: https://github.com/Portfoligno/immukv/releases/tag/0.1.13
 [0.1.12]: https://github.com/Portfoligno/immukv/releases/tag/0.1.12
 [0.1.11]: https://github.com/Portfoligno/immukv/releases/tag/0.1.11
 [0.1.10]: https://github.com/Portfoligno/immukv/releases/tag/0.1.10
