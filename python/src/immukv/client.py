@@ -94,9 +94,12 @@ class ImmuKVClient(Generic[K, V]):
                 client_params["endpoint_url"] = config.overrides.endpoint_url
             if config.overrides.credentials:
                 client_params["aws_access_key_id"] = config.overrides.credentials.aws_access_key_id
-                client_params["aws_secret_access_key"] = config.overrides.credentials.aws_secret_access_key
+                client_params["aws_secret_access_key"] = (
+                    config.overrides.credentials.aws_secret_access_key
+                )
             if config.overrides.force_path_style:
                 from botocore.config import Config as BotocoreConfig
+
                 client_params["config"] = BotocoreConfig(s3={"addressing_style": "path"})
 
         raw_s3: S3Client = boto3.client("s3", **client_params)  # type: ignore[assignment,call-overload]
