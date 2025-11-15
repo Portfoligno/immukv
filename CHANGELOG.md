@@ -5,6 +5,24 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.14] - 2025-11-15
+
+### Added
+
+- TypeScript: Strict boolean expression checking via ESLint rules
+  - `@typescript-eslint/strict-boolean-expressions`: Require explicit comparisons instead of implicit truthiness
+  - `@typescript-eslint/prefer-nullish-coalescing`: Use `??` instead of `||` for null coalescing
+- Python: Explicit `is not None` checks instead of implicit truthiness for Optional types
+- CI: Scheduled Claude Code Action workflow to automatically check Python code for implicit boolean expressions on Optional types (runs 3x daily)
+
+### Changed
+
+- Internal: Corrected AWS SDK type definitions to match actual API behavior
+  - Both AWS SDK JS and boto3-stubs incorrectly mark field optionality
+  - Added factory methods (`fromAwsSdk()`/`from_boto3()`) to reconstruct types at wrapper boundary
+  - Changed optional field semantics from "field can be absent" to "field always present, value can be None/undefined"
+- Internal: Updated all test references from LocalStack to MinIO
+
 ## [0.1.13] - 2025-11-14
 
 ### Added
@@ -158,6 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.14]: https://github.com/Portfoligno/immukv/releases/tag/0.1.14
 [0.1.13]: https://github.com/Portfoligno/immukv/releases/tag/0.1.13
 [0.1.12]: https://github.com/Portfoligno/immukv/releases/tag/0.1.12
 [0.1.11]: https://github.com/Portfoligno/immukv/releases/tag/0.1.11
