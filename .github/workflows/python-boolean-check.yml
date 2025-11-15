@@ -49,10 +49,6 @@ jobs:
 
             The rule is: if the type is Optional[T], use explicit None checks. No exceptions.
 
-            **Files to check:**
-            - python/src/immukv/**/*.py
-            - python/tests/**/*.py
-
             **If violations found:**
             1. Fix ALL occurrences by replacing with explicit `is not None` or `is None`
             2. Run test suite to verify
