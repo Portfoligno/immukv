@@ -16,10 +16,10 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - name: Checkout main branch
+      - name: Checkout branch
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event_name == 'schedule' && 'main' || github.ref }}
 
       - name: Run Claude Code to check for implicit boolean expressions
         uses: anthropics/claude-code-action@v1
@@ -47,7 +47,7 @@ jobs:
             2. Run the test suite to ensure nothing breaks
             3. Create a branch named `fix/python-implicit-boolean-YYYYMMDD`
             4. Commit the changes with a clear message explaining the fixes
-            5. Create a PR to main with:
+            5. Create a PR to the current branch with:
                - Title: "fix: Replace implicit truthiness checks with explicit None checks in Python"
                - Description listing all files and violations fixed
                - Note that this prevents bugs where empty strings, empty lists, or 0 are treated as None
