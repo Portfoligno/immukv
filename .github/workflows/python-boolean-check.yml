@@ -1,0 +1,60 @@
+name: Python Boolean Check
+
+on:
+  schedule:
+    # Run 3 times daily at random times (deterministic from repo name hash)
+    - cron: '39 4 * * *'   # 04:39 UTC
+    - cron: '6 20 * * *'   # 20:06 UTC
+    - cron: '46 23 * * *'  # 23:46 UTC
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check-python-boolean-expressions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Run Claude Code to check for implicit boolean expressions
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Please search the Python codebase for implicit truthiness checks on Optional types that should use explicit `is not None` checks instead.
+
+            Search for patterns like:
+            - `if some_optional:` where some_optional is Optional[T]
+            - `if not some_optional:` where some_optional is Optional[T]
+            - Use of Optional values in boolean contexts without explicit None checks
+
+            Focus on the following files:
+            - python/src/immukv/**/*.py
+            - python/tests/**/*.py
+
+            For each violation found:
+            1. Identify the variable and its type
+            2. Determine if it's an Optional type
+            3. Check if it's using implicit truthiness (if x:) instead of explicit check (if x is not None:)
+
+            If you find any violations:
+            1. Fix all occurrences by replacing implicit checks with explicit `is not None` checks
+            2. Run the test suite to ensure nothing breaks
+            3. Create a branch named `fix/python-implicit-boolean-YYYYMMDD`
+            4. Commit the changes with a clear message explaining the fixes
+            5. Create a PR to main with:
+               - Title: "fix: Replace implicit truthiness checks with explicit None checks in Python"
+               - Description listing all files and violations fixed
+               - Note that this prevents bugs where empty strings, empty lists, or 0 are treated as None
+
+            If no violations are found:
+            - Exit successfully without creating a PR
+            - Log that no violations were found
+
+            Important: Only flag Optional types where implicit truthiness could cause bugs.
+            Do NOT flag: list/dict length checks, string emptiness checks unless the type is Optional.
