@@ -91,10 +91,10 @@ class ImmuKVClient(Generic[K, V]):
             "region_name": config.s3_region,
         }
 
-        if config.overrides:
-            if config.overrides.endpoint_url:
+        if config.overrides is not None:
+            if config.overrides.endpoint_url is not None:
                 client_params["endpoint_url"] = config.overrides.endpoint_url
-            if config.overrides.credentials:
+            if config.overrides.credentials is not None:
                 client_params["aws_access_key_id"] = config.overrides.credentials.aws_access_key_id
                 client_params["aws_secret_access_key"] = (
                     config.overrides.credentials.aws_secret_access_key
@@ -190,7 +190,7 @@ class ImmuKVClient(Generic[K, V]):
 
             # Step 5: Write to log with optimistic locking
             try:
-                if log_etag:
+                if log_etag is not None:
                     # Update existing log - use IfMatch
                     response = self.s3.put_object(
                         bucket=self.config.s3_bucket,
@@ -244,7 +244,7 @@ class ImmuKVClient(Generic[K, V]):
                 "previous_hash": prev_hash,
             }
 
-            if current_key_etag:
+            if current_key_etag is not None:
                 # UPDATE existing key object - use IfMatch
                 response = self.s3.put_object(
                     bucket=self.config.s3_bucket,
@@ -387,9 +387,9 @@ class ImmuKVClient(Generic[K, V]):
                     "bucket": self.config.s3_bucket,
                     "prefix": key_path,
                 }
-                if key_marker:
+                if key_marker is not None:
                     list_params["KeyMarker"] = key_marker  # type: ignore[misc]
-                if version_id_marker:
+                if version_id_marker is not None:
                     list_params["VersionIdMarker"] = version_id_marker  # type: ignore[misc]
 
                 page = self.s3.list_object_versions(**list_params)  # type: ignore[misc]
@@ -462,9 +462,9 @@ class ImmuKVClient(Generic[K, V]):
                     "bucket": self.config.s3_bucket,
                     "prefix": self.log_key,
                 }
-                if key_marker:
+                if key_marker is not None:
                     list_params["KeyMarker"] = key_marker  # type: ignore[misc]
-                if version_id_marker:
+                if version_id_marker is not None:
                     list_params["VersionIdMarker"] = version_id_marker  # type: ignore[misc]
 
                 page = self.s3.list_object_versions(**list_params)  # type: ignore[misc]
@@ -524,7 +524,7 @@ class ImmuKVClient(Generic[K, V]):
             page_iterator = paginator.paginate(  # type: ignore[misc]
                 Bucket=self.config.s3_bucket,
                 Prefix=prefix,
-                StartAfter=f"{prefix}{after_key}.json" if after_key else prefix,
+                StartAfter=f"{prefix}{after_key}.json" if after_key is not None else prefix,
             )
 
             for page in page_iterator:  # type: ignore[misc]
