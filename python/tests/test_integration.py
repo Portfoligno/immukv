@@ -1,4 +1,4 @@
-"""Integration tests using real S3 API (LocalStack).
+"""Integration tests using real S3 API (MinIO).
 
 These tests verify ImmuKV behavior against actual S3 operations,
 testing specifications that cannot be adequately verified with mocks.
@@ -37,7 +37,7 @@ def identity_parser(value: JSONValue) -> object:
 @pytest.fixture(scope="session")  # type: ignore[misc]
 def raw_s3() -> S3Client:
     """Create raw S3 client for bucket management."""
-    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localstack:4566")
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
     # Use environment variables if set, otherwise default to test credentials
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
@@ -65,9 +65,7 @@ def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
     raw_s3.create_bucket(Bucket=bucket_name)
 
     # Enable versioning
-    raw_s3.put_bucket_versioning(
-        Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"}
-    )
+    raw_s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
 
     yield bucket_name
 
@@ -96,8 +94,8 @@ def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
 
 @pytest.fixture  # type: ignore[misc]
 def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
-    """Create ImmuKV client connected to LocalStack."""
-    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localstack:4566")
+    """Create ImmuKV client connected to MinIO."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
 
@@ -236,11 +234,10 @@ def test_list_object_versions_returns_proper_order(
 
     # List versions
     prefix_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/key1.json")
-    response = s3_client.list_object_versions(
-        bucket=client.config.s3_bucket, prefix=prefix_path
-    )
+    response = s3_client.list_object_versions(bucket=client.config.s3_bucket, prefix=prefix_path)
 
     versions = response["Versions"]
+    assert versions is not None
     assert len(versions) == 3
 
     # Should be in reverse chronological order (newest first)
@@ -255,9 +252,7 @@ def test_log_object_structure_matches_spec(
 
     # Read log object directly from S3
     log_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}_log.json")
-    response = s3_client.get_object(
-        bucket=client.config.s3_bucket, key=log_path, version_id=None
-    )
+    response = s3_client.get_object(bucket=client.config.s3_bucket, key=log_path, version_id=None)
 
     log_data = read_body_as_json(response["Body"])
 
@@ -285,9 +280,7 @@ def test_key_object_structure_matches_spec(
 
     # Read key object directly from S3
     key_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/key1.json")
-    response = s3_client.get_object(
-        bucket=client.config.s3_bucket, key=key_path, version_id=None
-    )
+    response = s3_client.get_object(bucket=client.config.s3_bucket, key=key_path, version_id=None)
 
     key_data = read_body_as_json(response["Body"])
 
@@ -309,6 +302,4 @@ def test_key_object_structure_matches_spec(
     excluded_fields = ["previous_version_id", "previous_key_object_etag"]
 
     for field in excluded_fields:
-        assert (
-            field not in key_data
-        ), f"Key object should not contain infrastructure field: {field}"
+        assert field not in key_data, f"Key object should not contain infrastructure field: {field}"

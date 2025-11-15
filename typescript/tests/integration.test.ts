@@ -1,5 +1,5 @@
 /**
- * Integration tests using real S3 API (LocalStack).
+ * Integration tests using real S3 API (MinIO).
  *
  * These tests verify ImmuKV behavior against actual S3 operations,
  * testing specifications that cannot be adequately verified with mocks.
@@ -27,7 +27,7 @@ function identityParser(value: any): any {
   return value;
 }
 
-describe('Integration Tests with LocalStack', () => {
+describe('Integration Tests with MinIO', () => {
   let s3Client: S3Client;
   let bucketName: string;
   let client: ImmuKVClient<string, any>;
@@ -41,7 +41,7 @@ describe('Integration Tests with LocalStack', () => {
     // Create unique bucket per test for complete isolation
     bucketName = `test-immukv-${uuidv4().substring(0, 8)}`;
 
-    const endpointUrl = process.env.IMMUKV_S3_ENDPOINT || 'http://localstack:4566';
+    const endpointUrl = process.env.IMMUKV_S3_ENDPOINT || 'http://minio:9000';
     // Use environment variables if set, otherwise default to test credentials
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID || 'test';
     const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || 'test';
@@ -83,7 +83,9 @@ describe('Integration Tests with LocalStack', () => {
   });
 
   afterEach(async () => {
-    client.close();
+    if (client !== undefined) {
+      await client.close();
+    }
 
     // Cleanup: delete all versions then bucket
     try {

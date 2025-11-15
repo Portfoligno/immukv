@@ -1,5 +1,5 @@
 /**
- * Pure unit tests that don't require S3 or LocalStack.
+ * Pure unit tests that don't require S3 or MinIO.
  *
  * These tests verify pure logic: hash computation, data validation,
  * type checking, and other functionality that doesn't need S3.

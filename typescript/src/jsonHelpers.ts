@@ -53,7 +53,7 @@ function escapeNonAscii(str: string): string {
  */
 export function stringifyCanonical(data: JSONValue): string {
   const json = JSON.stringify(data, (key, value) => {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       // Sort object keys for deterministic serialization
       return Object.keys(value)
         .sort()

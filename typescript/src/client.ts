@@ -70,7 +70,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
    * Write new entry (two-phase: pre-flight repair, log, key object).
    */
   async set(key: K, value: V): Promise<Entry<K, V>> {
-    if (this.config.readOnly) {
+    if (this.config.readOnly === true) {
       throw new ReadOnlyError('Cannot call set() in read-only mode');
     }
 
@@ -83,7 +83,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
       if (canWrite !== undefined) {
         this.canWrite = canWrite;
       }
-      if (orphanStatus) {
+      if (orphanStatus !== undefined) {
         this.latestOrphanStatus = orphanStatus;
       }
       this.lastRepairCheckMs = Date.now();
@@ -136,11 +136,11 @@ export class ImmuKVClient<K extends string = string, V = any> {
           Key: this.logKey,
           Body: stringifyCanonical(logEntry as JSONValue),
           ContentType: 'application/json',
-          ...(logEtag ? { IfMatch: logEtag } : { IfNoneMatch: '*' }),
+          ...(logEtag !== undefined ? { IfMatch: logEtag } : { IfNoneMatch: '*' }),
         });
 
         const newLogVersionId = PutObjectCommandOutputs.logVersionId<K>(putResponse);
-        if (!newLogVersionId) {
+        if (newLogVersionId === undefined) {
           throw new Error(
             'S3 PutObject response missing VersionId - ensure versioning is enabled on bucket'
           );
@@ -164,7 +164,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
             Key: keyPath,
             Body: stringifyCanonical(keyData as JSONValue),
             ContentType: 'application/json',
-            ...(currentKeyEtag ? { IfMatch: currentKeyEtag } : { IfNoneMatch: '*' }),
+            ...(currentKeyEtag !== undefined ? { IfMatch: currentKeyEtag } : { IfNoneMatch: '*' }),
           });
           keyObjectEtag = PutObjectCommandOutputs.keyObjectEtag(keyResponse);
         } catch (error) {
@@ -204,12 +204,12 @@ export class ImmuKVClient<K extends string = string, V = any> {
     const timeSinceLastCheck = currentTimeMs - this.lastRepairCheckMs;
 
     if (timeSinceLastCheck >= this.config.repairCheckIntervalMs!) {
-      if (!(this.canWrite === false || this.config.readOnly)) {
+      if (!(this.canWrite === false || this.config.readOnly === true)) {
         const result = await this.getLatestAndRepair();
         if (result.canWrite !== undefined) {
           this.canWrite = result.canWrite;
         }
-        if (result.orphanStatus) {
+        if (result.orphanStatus !== undefined) {
           this.latestOrphanStatus = result.orphanStatus;
         }
         this.lastRepairCheckMs = currentTimeMs;
@@ -239,10 +239,10 @@ export class ImmuKVClient<K extends string = string, V = any> {
     } catch (error: any) {
       if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
         if (
-          this.latestOrphanStatus?.isOrphaned &&
+          this.latestOrphanStatus?.isOrphaned === true &&
           this.latestOrphanStatus.orphanKey === key &&
-          this.latestOrphanStatus.orphanEntry &&
-          (this.canWrite === false || this.config.readOnly)
+          this.latestOrphanStatus.orphanEntry !== undefined &&
+          (this.canWrite === false || this.config.readOnly === true)
         ) {
           return this.latestOrphanStatus.orphanEntry;
         }
@@ -271,14 +271,16 @@ export class ImmuKVClient<K extends string = string, V = any> {
         timestampMs: timestampFromJson(data.timestamp_ms as number),
         versionId,
         sequence: sequenceFromJson(data.sequence as number),
-        previousVersionId: data.previous_version_id
-          ? (data.previous_version_id as LogVersionId<K>)
-          : undefined,
+        previousVersionId:
+          data.previous_version_id !== undefined
+            ? (data.previous_version_id as LogVersionId<K>)
+            : undefined,
         hash: hashFromJson(data.hash as string),
         previousHash: hashFromJson(data.previous_hash as string),
-        previousKeyObjectEtag: data.previous_key_object_etag
-          ? (data.previous_key_object_etag as KeyObjectETag<K>)
-          : undefined,
+        previousKeyObjectEtag:
+          data.previous_key_object_etag !== null
+            ? (data.previous_key_object_etag as KeyObjectETag<K>)
+            : undefined,
       };
     } catch (error: any) {
       if (
@@ -306,9 +308,9 @@ export class ImmuKVClient<K extends string = string, V = any> {
     let prependOrphan = false;
     if (
       beforeVersionId === null &&
-      this.latestOrphanStatus?.isOrphaned &&
+      this.latestOrphanStatus?.isOrphaned === true &&
       this.latestOrphanStatus.orphanKey === key &&
-      this.latestOrphanStatus.orphanEntry
+      this.latestOrphanStatus.orphanEntry !== undefined
     ) {
       prependOrphan = true;
       entries.push(this.latestOrphanStatus.orphanEntry);
@@ -323,21 +325,16 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const response = await this.s3.listObjectVersions({
           Bucket: this.config.s3Bucket,
           Prefix: keyPath,
-          KeyMarker: versionIdMarker ? keyPath : undefined,
+          KeyMarker: versionIdMarker !== undefined ? keyPath : undefined,
           VersionIdMarker: versionIdMarker,
         });
 
         const versions = response.Versions ?? [];
         for (const version of versions) {
           if (version.Key !== keyPath) continue;
-          if (beforeVersionId && version.VersionId === beforeVersionId) continue;
+          if (beforeVersionId !== null && version.VersionId === beforeVersionId) continue;
 
           const keyVersionId = ObjectVersions.keyVersionId<K>(version);
-          if (!keyVersionId) {
-            throw new Error(
-              'S3 ObjectVersion missing VersionId - ensure versioning is enabled on bucket'
-            );
-          }
           const objResponse = await this.s3.getObject({
             Bucket: this.config.s3Bucket,
             Key: keyPath,
@@ -366,9 +363,10 @@ export class ImmuKVClient<K extends string = string, V = any> {
         }
 
         isTruncated = response.IsTruncated ?? false;
-        versionIdMarker = response.NextVersionIdMarker
-          ? (response.NextVersionIdMarker as KeyVersionId<K>)
-          : undefined;
+        versionIdMarker =
+          response.NextVersionIdMarker !== undefined
+            ? (response.NextVersionIdMarker as KeyVersionId<K>)
+            : undefined;
       }
     } catch (error: any) {
       if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
@@ -402,14 +400,14 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const response = await this.s3.listObjectVersions({
           Bucket: this.config.s3Bucket,
           Prefix: this.logKey,
-          KeyMarker: versionIdMarker ? this.logKey : undefined,
+          KeyMarker: versionIdMarker !== undefined ? this.logKey : undefined,
           VersionIdMarker: versionIdMarker,
         });
 
         const versions = response.Versions ?? [];
         for (const version of versions) {
           if (version.Key !== this.logKey) continue;
-          if (beforeVersionId && version.VersionId === beforeVersionId) continue;
+          if (beforeVersionId !== null && version.VersionId === beforeVersionId) continue;
 
           const objResponse = await this.s3.getObject({
             Bucket: this.config.s3Bucket,
@@ -420,11 +418,6 @@ export class ImmuKVClient<K extends string = string, V = any> {
           const data = await readBodyAsJson(objResponse.Body);
 
           const logVersionId = ObjectVersions.logVersionId<K>(version);
-          if (!logVersionId) {
-            throw new Error(
-              'S3 ObjectVersion missing VersionId - ensure versioning is enabled on bucket'
-            );
-          }
 
           const entry: Entry<K, V> = {
             key: data.key as K,
@@ -432,14 +425,16 @@ export class ImmuKVClient<K extends string = string, V = any> {
             timestampMs: timestampFromJson(data.timestamp_ms as number),
             versionId: logVersionId,
             sequence: sequenceFromJson(data.sequence as number),
-            previousVersionId: data.previous_version_id
-              ? (data.previous_version_id as LogVersionId<K>)
-              : undefined,
+            previousVersionId:
+              data.previous_version_id !== undefined && data.previous_version_id !== null
+                ? (data.previous_version_id as LogVersionId<K>)
+                : undefined,
             hash: hashFromJson(data.hash as string),
             previousHash: hashFromJson(data.previous_hash as string),
-            previousKeyObjectEtag: data.previous_key_object_etag
-              ? (data.previous_key_object_etag as KeyObjectETag<K>)
-              : undefined,
+            previousKeyObjectEtag:
+              data.previous_key_object_etag !== undefined && data.previous_key_object_etag !== null
+                ? (data.previous_key_object_etag as KeyObjectETag<K>)
+                : undefined,
           };
           entries.push(entry);
 
@@ -449,9 +444,10 @@ export class ImmuKVClient<K extends string = string, V = any> {
         }
 
         isTruncated = response.IsTruncated ?? false;
-        versionIdMarker = response.NextVersionIdMarker
-          ? (response.NextVersionIdMarker as LogVersionId<K>)
-          : undefined;
+        versionIdMarker =
+          response.NextVersionIdMarker !== undefined
+            ? (response.NextVersionIdMarker as LogVersionId<K>)
+            : undefined;
       }
     } catch (error: any) {
       if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
@@ -475,18 +471,16 @@ export class ImmuKVClient<K extends string = string, V = any> {
       let isTruncated = true;
 
       while (isTruncated) {
-        const response = await this.s3.client.send(
-          new s3.ListObjectsV2Command({
-            Bucket: this.config.s3Bucket,
-            Prefix: prefix,
-            StartAfter: afterKey ? `${prefix}${afterKey}.json` : prefix,
-            ContinuationToken: continuationToken,
-          })
-        );
+        const response = await this.s3.listObjectsV2({
+          Bucket: this.config.s3Bucket,
+          Prefix: prefix,
+          StartAfter: afterKey !== null ? `${prefix}${afterKey}.json` : prefix,
+          ContinuationToken: continuationToken,
+        });
 
         const contents = response.Contents ?? [];
         for (const obj of contents) {
-          const keyName = obj.Key!.substring(prefix.length);
+          const keyName = obj.Key.substring(prefix.length);
           if (keyName.endsWith('.json')) {
             const cleanKey = keyName.substring(0, keyName.length - 5) as K;
             keys.push(cleanKey);
@@ -497,7 +491,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
           }
         }
 
-        isTruncated = response.IsTruncated ?? false;
+        isTruncated = response.IsTruncated;
         continuationToken = response.NextContinuationToken;
       }
     } catch (error) {
@@ -589,14 +583,16 @@ export class ImmuKVClient<K extends string = string, V = any> {
         timestampMs: timestampFromJson(data.timestamp_ms as number),
         versionId: currentVersionId,
         sequence: sequenceFromJson(data.sequence as number),
-        previousVersionId: data.previous_version_id
-          ? (data.previous_version_id as LogVersionId<K>)
-          : undefined,
+        previousVersionId:
+          data.previous_version_id !== undefined
+            ? (data.previous_version_id as LogVersionId<K>)
+            : undefined,
         hash: hashFromJson(data.hash as string),
         previousHash: hashFromJson(data.previous_hash as string),
-        previousKeyObjectEtag: data.previous_key_object_etag
-          ? (data.previous_key_object_etag as KeyObjectETag<K>)
-          : undefined,
+        previousKeyObjectEtag:
+          data.previous_key_object_etag !== null
+            ? (data.previous_key_object_etag as KeyObjectETag<K>)
+            : undefined,
       };
 
       const [canWrite, orphanStatus] = await this.repairOrphan(latestEntry);
@@ -623,7 +619,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
   private async repairOrphan(
     latestLog: Entry<K, V>
   ): Promise<[boolean | undefined, OrphanStatus<K, V> | undefined]> {
-    if (this.config.readOnly || this.canWrite === false) {
+    if (this.config.readOnly === true || this.canWrite === false) {
       const keyPath = S3KeyPaths.forKey(this.config.s3Prefix, latestLog.key);
       try {
         await this.s3.headObject({
@@ -674,12 +670,11 @@ export class ImmuKVClient<K extends string = string, V = any> {
         Key: keyPath,
         Body: stringifyCanonical(repairData as JSONValue),
         ContentType: 'application/json',
-        ...(latestLog.previousKeyObjectEtag
+        ...(latestLog.previousKeyObjectEtag !== undefined
           ? { IfMatch: latestLog.previousKeyObjectEtag }
           : { IfNoneMatch: '*' }),
       });
 
-      console.log(`Propagated log entry to key object for ${latestLog.key}`);
       return [
         true,
         {

@@ -1,7 +1,7 @@
-"""Integration tests for ImmuKV client using LocalStack.
+"""Integration tests for ImmuKV client using MinIO.
 
-These tests require LocalStack running and test actual S3 operations.
-Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:4566 pytest
+These tests require MinIO running and test actual S3 operations.
+Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:9000 pytest
 """
 
 import os
@@ -61,9 +61,7 @@ def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
     raw_s3.create_bucket(Bucket=bucket_name)
 
     # Enable versioning
-    raw_s3.put_bucket_versioning(
-        Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"}
-    )
+    raw_s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
 
     yield bucket_name
 
@@ -92,8 +90,8 @@ def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
 
 @pytest.fixture  # type: ignore[misc]
 def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
-    """Create ImmuKV client connected to LocalStack."""
-    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:4566")
+    """Create ImmuKV client connected to MinIO."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:9000")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
 
@@ -459,7 +457,7 @@ def test_custom_endpoint_url_config(s3_bucket: str) -> None:
     assert client_instance.config.overrides is not None
     assert client_instance.config.overrides.endpoint_url == "http://localhost:4566"
 
-    # Note: Actual operations would require LocalStack/MinIO/moto running at that endpoint.
+    # Note: Actual operations would require MinIO/moto running at that endpoint.
     # This test verifies the config accepts and stores the overrides correctly.
 
 

@@ -2,11 +2,13 @@
 
 import logging
 import time
-from typing import Any, Dict, Generic, List, Optional, Tuple, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar, cast
 
 import boto3
 from botocore.exceptions import ClientError
-from mypy_boto3_s3.client import S3Client
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3.client import S3Client
 
 from immukv.json_helpers import (
     JSONValue,
@@ -20,12 +22,12 @@ from immukv.json_helpers import (
 from immukv._internal.s3_client import BrandedS3Client
 from immukv._internal.s3_helpers import get_error_code, read_body_as_json
 from immukv._internal.s3_types import (
+    HeadObjectOutputs,
     LogKey,
-    S3HeadObjectResponses,
+    ObjectVersions,
+    PutObjectOutputs,
     S3KeyPath,
     S3KeyPaths,
-    S3ObjectVersions,
-    S3PutObjectResponses,
 )
 from immukv.types import (
     Config,
@@ -102,7 +104,7 @@ class ImmuKVClient(Generic[K, V]):
 
                 client_params["config"] = BotocoreConfig(s3={"addressing_style": "path"})
 
-        raw_s3: S3Client = boto3.client("s3", **client_params)  # type: ignore[assignment,call-overload]
+        raw_s3: "S3Client" = boto3.client("s3", **client_params)  # type: ignore[assignment,call-overload]
         self.s3 = BrandedS3Client(raw_s3)
         self.log_key = cast(S3KeyPath[LogKey], S3KeyPaths.for_log(config.s3_prefix))
         self._last_repair_check_ms = 0  # In-memory timestamp tracking
@@ -151,7 +153,7 @@ class ImmuKVClient(Generic[K, V]):
             current_key_etag: Optional[KeyObjectETag[K]] = None
             try:
                 current_key = self.s3.head_object(bucket=self.config.s3_bucket, key=key_path)
-                current_key_etag = S3HeadObjectResponses.key_object_etag(current_key)
+                current_key_etag = HeadObjectOutputs.key_object_etag(current_key)
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
                 if get_error_code(e) in ["NoSuchKey", "404"]:
                     current_key_etag = None
@@ -207,7 +209,14 @@ class ImmuKVClient(Generic[K, V]):
                         if_none_match="*",
                     )
 
-                new_log_version_id: LogVersionId[K] = S3PutObjectResponses.log_version_id(response)
+                new_log_version_id_opt: Optional[LogVersionId[K]] = PutObjectOutputs.log_version_id(
+                    response
+                )
+                if new_log_version_id_opt is None:
+                    raise ValueError(
+                        "S3 response missing VersionId - versioning must be enabled on bucket"
+                    )
+                new_log_version_id: LogVersionId[K] = new_log_version_id_opt
                 break  # ✅ Committed to log! Exit retry loop
 
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
@@ -244,7 +253,7 @@ class ImmuKVClient(Generic[K, V]):
                     content_type="application/json",
                     if_match=current_key_etag,
                 )
-                key_object_etag = S3PutObjectResponses.key_object_etag(response)
+                key_object_etag = PutObjectOutputs.key_object_etag(response)
             else:
                 # CREATE new key object - use if_none_match='*'
                 response = self.s3.put_object(
@@ -254,7 +263,7 @@ class ImmuKVClient(Generic[K, V]):
                     content_type="application/json",
                     if_none_match="*",
                 )
-                key_object_etag = S3PutObjectResponses.key_object_etag(response)
+                key_object_etag = PutObjectOutputs.key_object_etag(response)
 
         except Exception as e:
             logger.warning(
@@ -384,7 +393,7 @@ class ImmuKVClient(Generic[K, V]):
                     list_params["VersionIdMarker"] = version_id_marker  # type: ignore[misc]
 
                 page = self.s3.list_object_versions(**list_params)  # type: ignore[misc]
-                versions = page.get("Versions", [])
+                versions = page.get("Versions") or []
                 for version in versions:
                     if version["Key"] != key_path:
                         continue
@@ -394,7 +403,7 @@ class ImmuKVClient(Generic[K, V]):
                         continue
 
                     # Fetch version data
-                    key_version_id: KeyVersionId[K] = S3ObjectVersions.key_version_id(version)
+                    key_version_id: KeyVersionId[K] = ObjectVersions.key_version_id(version)
                     response = self.s3.get_object(
                         bucket=self.config.s3_bucket,
                         key=key_path,
@@ -459,7 +468,7 @@ class ImmuKVClient(Generic[K, V]):
                     list_params["VersionIdMarker"] = version_id_marker  # type: ignore[misc]
 
                 page = self.s3.list_object_versions(**list_params)  # type: ignore[misc]
-                versions = page.get("Versions", [])
+                versions = page.get("Versions") or []
                 for version in versions:
                     if version["Key"] != self.log_key:
                         continue
@@ -475,7 +484,7 @@ class ImmuKVClient(Generic[K, V]):
                         version_id=version["VersionId"],
                     )
                     data = read_body_as_json(response["Body"])
-                    version_id_log: LogVersionId[K] = S3ObjectVersions.log_version_id(version)
+                    version_id_log: LogVersionId[K] = ObjectVersions.log_version_id(version)
                     entry: Entry[K, V] = entry_from_log(data, version_id_log, self.value_parser)
                     entries.append(entry)
 
@@ -719,7 +728,7 @@ class ImmuKVClient(Generic[K, V]):
         }
 
         try:
-            if latest_log.previous_key_object_etag:
+            if latest_log.previous_key_object_etag is not None:
                 # UPDATE with if_match=<previous_etag>
                 self.s3.put_object(
                     bucket=self.config.s3_bucket,

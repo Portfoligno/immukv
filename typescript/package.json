@@ -10,8 +10,8 @@
     "test:client": "jest --testMatch='**/tests/client.test.ts'",
     "test:integration": "jest --testMatch='**/tests/integration.test.ts'",
     "type-check": "tsc --project tsconfig.test.json",
-    "lint": "eslint src/**/*.ts",
-    "format": "prettier --write \"src/**/*.ts\""
+    "lint": "eslint 'src/**/*.ts'",
+    "format": "prettier --write 'src/**/*.ts'"
   },
   "keywords": [
     "immutable",

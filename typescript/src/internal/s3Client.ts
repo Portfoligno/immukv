@@ -5,13 +5,18 @@
  */
 
 import * as s3 from '@aws-sdk/client-s3';
-import { brandWithKey } from '../types';
 import {
   S3KeyPath,
   GetObjectCommandOutput,
+  GetObjectCommandOutputs,
   PutObjectCommandOutput,
+  PutObjectCommandOutputs,
   HeadObjectCommandOutput,
-  ObjectVersion,
+  HeadObjectCommandOutputs,
+  ListObjectVersionsCommandOutput,
+  ListObjectVersionsCommandOutputs,
+  ListObjectsV2CommandOutput,
+  ListObjectsV2CommandOutputs,
 } from './s3Types';
 
 /**
@@ -24,21 +29,21 @@ export class BrandedS3Client {
     params: s3.GetObjectCommandInput & { Key: S3KeyPath<K> }
   ): Promise<GetObjectCommandOutput<K>> {
     const response = await this.s3.send(new s3.GetObjectCommand(params));
-    return brandWithKey<s3.GetObjectCommandOutput, 'GetObjectCommandOutput', K>(response);
+    return GetObjectCommandOutputs.fromAwsSdk(response);
   }
 
   async putObject<K extends string>(
     params: s3.PutObjectCommandInput & { Key: S3KeyPath<K> }
   ): Promise<PutObjectCommandOutput<K>> {
     const response = await this.s3.send(new s3.PutObjectCommand(params));
-    return brandWithKey<s3.PutObjectCommandOutput, 'PutObjectCommandOutput', K>(response);
+    return PutObjectCommandOutputs.fromAwsSdk(response);
   }
 
   async headObject<K extends string>(
     params: s3.HeadObjectCommandInput & { Key: S3KeyPath<K> }
   ): Promise<HeadObjectCommandOutput<K>> {
     const response = await this.s3.send(new s3.HeadObjectCommand(params));
-    return brandWithKey<s3.HeadObjectCommandOutput, 'HeadObjectCommandOutput', K>(response);
+    return HeadObjectCommandOutputs.fromAwsSdk(response);
   }
 
   async listObjectVersions<K extends string>(
@@ -46,17 +51,14 @@ export class BrandedS3Client {
       Prefix: S3KeyPath<K>;
       KeyMarker?: S3KeyPath<K>;
     }
-  ): Promise<{
-    Versions?: ObjectVersion<K>[];
-    IsTruncated?: boolean;
-    NextKeyMarker?: string;
-    NextVersionIdMarker?: string;
-  }> {
+  ): Promise<ListObjectVersionsCommandOutput<K>> {
     const response = await this.s3.send(new s3.ListObjectVersionsCommand(params));
-    return {
-      ...response,
-      Versions: response.Versions?.map(v => brandWithKey<s3.ObjectVersion, 'ObjectVersion', K>(v)),
-    };
+    return ListObjectVersionsCommandOutputs.fromAwsSdk(response);
+  }
+
+  async listObjectsV2(params: s3.ListObjectsV2CommandInput): Promise<ListObjectsV2CommandOutput> {
+    const response = await this.s3.send(new s3.ListObjectsV2Command(params));
+    return ListObjectsV2CommandOutputs.fromAwsSdk(response);
   }
 
   // Direct access to underlying S3Client for operations not wrapped

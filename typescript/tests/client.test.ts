@@ -1,8 +1,8 @@
 /**
- * Integration tests for ImmuKV client using LocalStack.
+ * Integration tests for ImmuKV client using MinIO.
  *
- * These tests require LocalStack running and test actual S3 operations.
- * Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:4566 npm test
+ * These tests require MinIO running and test actual S3 operations.
+ * Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:9000 npm test
  */
 
 import {
