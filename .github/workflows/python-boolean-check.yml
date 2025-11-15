@@ -28,35 +28,38 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           prompt: |
-            Please search the Python codebase for implicit truthiness checks on Optional types that should use explicit `is not None` checks instead.
+            Enforce strict boolean expressions for Python Optional types, equivalent to TypeScript's `@typescript-eslint/strict-boolean-expressions` rule.
 
-            Search for patterns like:
-            - `if some_optional:` where some_optional is Optional[T]
-            - `if not some_optional:` where some_optional is Optional[T]
-            - Use of Optional values in boolean contexts without explicit None checks
+            **CRITICAL: All implicit truthiness checks on Optional types are violations, regardless of the type's "valid values".**
 
-            Focus on the following files:
+            This codebase uses explicit `is not None` checks in TypeScript (enforced by @typescript-eslint/strict-boolean-expressions).
+            Python must follow the same strict standard.
+
+            **Violations to fix:**
+            - `if optional_value:` → `if optional_value is not None:`
+            - `if not optional_value:` → `if optional_value is None:`
+            - `value if optional_value else default` → `value if optional_value is not None else default`
+
+            Where `optional_value` has type `Optional[T]` for any T (including str, objects, etc.)
+
+            **DO NOT rationalize violations as "safe":**
+            - "ETags cannot be empty" - IRRELEVANT, must use `is not None`
+            - "Version IDs are never empty" - IRRELEVANT, must use `is not None`
+            - "This type doesn't have falsy values" - IRRELEVANT, must use `is not None`
+
+            The rule is: if the type is Optional[T], use explicit None checks. No exceptions.
+
+            **Files to check:**
             - python/src/immukv/**/*.py
             - python/tests/**/*.py
 
-            For each violation found:
-            1. Identify the variable and its type
-            2. Determine if it's an Optional type
-            3. Check if it's using implicit truthiness (if x:) instead of explicit check (if x is not None:)
+            **If violations found:**
+            1. Fix ALL occurrences by replacing with explicit `is not None` or `is None`
+            2. Run test suite to verify
+            3. Create branch `fix/python-implicit-boolean-YYYYMMDD`
+            4. Commit with clear message
+            5. Create PR to current branch with title "fix: Replace implicit truthiness checks with explicit None checks in Python"
 
-            If you find any violations:
-            1. Fix all occurrences by replacing implicit checks with explicit `is not None` checks
-            2. Run the test suite to ensure nothing breaks
-            3. Create a branch named `fix/python-implicit-boolean-YYYYMMDD`
-            4. Commit the changes with a clear message explaining the fixes
-            5. Create a PR to the current branch with:
-               - Title: "fix: Replace implicit truthiness checks with explicit None checks in Python"
-               - Description listing all files and violations fixed
-               - Note that this prevents bugs where empty strings, empty lists, or 0 are treated as None
-
-            If no violations are found:
-            - Exit successfully without creating a PR
+            **If no violations found:**
+            - Exit successfully without creating PR
             - Log that no violations were found
-
-            Important: Only flag Optional types where implicit truthiness could cause bugs.
-            Do NOT flag: list/dict length checks, string emptiness checks unless the type is Optional.
