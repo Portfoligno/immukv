@@ -5,6 +5,18 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.15] - 2025-11-16
+
+### Fixed
+
+- Python: All implicit truthiness checks on Optional types replaced with explicit `is not None` checks
+  - client.py: 20 violations fixed across config checks, pagination markers, and orphan status handling
+  - json_helpers.py: 2 violations fixed in entry deserialization
+
+### Changed
+
+- CI: Python boolean check workflow now runs every 8 hours (previously 3x daily)
+
 ## [0.1.14] - 2025-11-15
 
 ### Added
@@ -176,6 +188,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.15]: https://github.com/Portfoligno/immukv/releases/tag/0.1.15
 [0.1.14]: https://github.com/Portfoligno/immukv/releases/tag/0.1.14
 [0.1.13]: https://github.com/Portfoligno/immukv/releases/tag/0.1.13
 [0.1.12]: https://github.com/Portfoligno/immukv/releases/tag/0.1.12
