@@ -399,7 +399,7 @@ class ImmuKVClient(Generic[K, V]):
                         continue
 
                     # Skip the before_version_id itself
-                    if before_version_id and version["VersionId"] == before_version_id:
+                    if before_version_id is not None and version["VersionId"] == before_version_id:
                         continue
 
                     # Fetch version data
@@ -474,7 +474,7 @@ class ImmuKVClient(Generic[K, V]):
                         continue
 
                     # Skip the before_version_id itself
-                    if before_version_id and version["VersionId"] == before_version_id:
+                    if before_version_id is not None and version["VersionId"] == before_version_id:
                         continue
 
                     # Fetch version data
