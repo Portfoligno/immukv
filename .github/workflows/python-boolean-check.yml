@@ -66,7 +66,7 @@ jobs:
                  - Fix all violations by replacing with explicit `is not None` or `is None` checks
                  - Commit and push your changes
                  - Check CI status - if it fails, fix the issues and push again
-                 - Once CI passes, run `gh pr create` to create the PR
+                 - Once CI passes, create a pull request using `gh pr create` (you have permission to run this command)
 
             **If no violations found:**
             - Exit successfully without creating an issue
