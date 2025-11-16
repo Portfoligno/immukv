@@ -2,10 +2,8 @@ name: Python Boolean Check
 
 on:
   schedule:
-    # Run 3 times daily at random times (deterministic from repo name hash)
-    - cron: '39 4 * * *'   # 04:39 UTC
-    - cron: '6 20 * * *'   # 20:06 UTC
-    - cron: '46 23 * * *'  # 23:46 UTC
+    # Run every 8 hours starting at 04:39 UTC
+    - cron: '39 4,12,20 * * *'
   workflow_dispatch: # Allow manual trigger
 
 jobs:
