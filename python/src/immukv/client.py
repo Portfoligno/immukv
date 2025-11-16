@@ -319,10 +319,10 @@ class ImmuKVClient(Generic[K, V]):
             if get_error_code(e) in ["NoSuchKey", "404"]:
                 # Key object doesn't exist - check for orphan fallback
                 if (
-                    self._latest_orphan_status
-                    and self._latest_orphan_status.get("is_orphaned")
+                    self._latest_orphan_status is not None
+                    and self._latest_orphan_status.get("is_orphaned") is not None
                     and self._latest_orphan_status.get("orphan_key") == key
-                    and self._latest_orphan_status.get("orphan_entry")
+                    and self._latest_orphan_status.get("orphan_entry") is not None
                     and (self._can_write is False or self.config.read_only)
                 ):
                     # Return cached orphan entry (read-only mode)
@@ -368,10 +368,10 @@ class ImmuKVClient(Generic[K, V]):
         prepend_orphan = False
         if (
             before_version_id is None
-            and self._latest_orphan_status
-            and self._latest_orphan_status.get("is_orphaned")
+            and self._latest_orphan_status is not None
+            and self._latest_orphan_status.get("is_orphaned") is not None
             and self._latest_orphan_status.get("orphan_key") == key
-            and self._latest_orphan_status.get("orphan_entry")
+            and self._latest_orphan_status.get("orphan_entry") is not None
         ):
             prepend_orphan = True
             entries.append(self._latest_orphan_status["orphan_entry"])  # type: ignore
