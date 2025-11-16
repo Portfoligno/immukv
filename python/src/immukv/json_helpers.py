@@ -107,10 +107,14 @@ def entry_from_log(
         timestamp_ms=timestamp_from_json(get_int(data, "timestamp_ms")),
         version_id=version_id,
         sequence=sequence_from_json(get_int(data, "sequence")),
-        previous_version_id=LogVersionId(prev_version_id_str) if prev_version_id_str else None,
+        previous_version_id=(
+            LogVersionId(prev_version_id_str) if prev_version_id_str is not None else None
+        ),
         hash=hash_from_json(get_str(data, "hash")),
         previous_hash=hash_from_json(get_str(data, "previous_hash")),
-        previous_key_object_etag=KeyObjectETag(prev_key_etag_str) if prev_key_etag_str else None,
+        previous_key_object_etag=(
+            KeyObjectETag(prev_key_etag_str) if prev_key_etag_str is not None else None
+        ),
     )
 
 
