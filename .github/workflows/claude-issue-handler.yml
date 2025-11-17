@@ -2,7 +2,7 @@ name: Claude Issue Handler
 
 on:
   issues:
-    types: [opened, edited]
+    types: [opened]
 
 jobs:
   handle-claude-mention:
@@ -22,6 +22,5 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          show_full_output: true
           allowed_bots: claude
           claude_args: --allowedTools 'Bash(gh pr create:*),Bash(gh run list:*),Bash(gh run view:*),Bash(gh run watch:*)'
