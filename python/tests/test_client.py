@@ -480,19 +480,22 @@ def test_orphan_status_false_does_not_return_orphan(client: ImmuKVClient[str, ob
     """Test that is_orphaned=False does not trigger orphan fallback in get()."""
     from immukv.types import KeyNotFoundError
 
-    # Set orphan status with is_orphaned=False
+    # Create an entry and set it as orphan status with is_orphaned=False
+    entry = client.set("test-key", {"value": "orphan_data"})
+
+    # Set read-only mode so orphan fallback would be checked
+    client._can_write = False
+
     client._latest_orphan_status = {
-        "is_orphaned": False,  # Explicitly False
-        "orphan_key": "test-key",
-        "orphan_entry": client.set("test-key", {"value": "orphan_data"}),
+        "is_orphaned": False,  # Explicitly False - repair completed
+        "orphan_key": "nonexistent-key",
+        "orphan_entry": entry,
         "checked_at": 0,
     }
 
-    # Delete the key object to simulate missing key
-    # (In real scenario, this would be done by deleting from S3)
-    # For this test, we'll use a different key that doesn't exist
-
     # get() should raise KeyNotFoundError, NOT return the orphan entry
+    # Even though all other conditions match (read-only, key matches, entry exists)
+    # is_orphaned=False should prevent the orphan fallback
     with pytest.raises(KeyNotFoundError, match="Key 'nonexistent-key' not found"):
         client.get("nonexistent-key")
 
@@ -502,25 +505,26 @@ def test_orphan_status_true_returns_orphan_in_readonly(
 ) -> None:
     """Test that is_orphaned=True correctly returns orphan entry in read-only mode."""
     # Create an entry
-    entry = client.set("test-key", {"value": "test_data"})
-
-    # Simulate orphan status with is_orphaned=True
-    client._latest_orphan_status = {
-        "is_orphaned": True,  # Explicitly True
-        "orphan_key": "test-key",
-        "orphan_entry": entry,
-        "checked_at": 0,
-    }
+    entry = client.set("existing-key", {"value": "test_data"})
 
     # Set read-only mode
     client._can_write = False
 
-    # Even though key exists, orphan fallback should activate in read-only
-    # (This tests the condition logic, not realistic scenario)
-    # In real use, the key object would be missing
+    # Simulate orphan status with is_orphaned=True for a nonexistent key
+    client._latest_orphan_status = {
+        "is_orphaned": True,  # Explicitly True - orphan exists
+        "orphan_key": "orphaned-key",
+        "orphan_entry": entry,
+        "checked_at": 0,
+    }
 
-    # For proper test, we need to ensure key object doesn't exist
-    # This is hard to test without S3 manipulation, so we test the history() case
+    # get() on the orphaned key should return the orphan entry (not raise)
+    # Even though the key object doesn't exist in S3
+    result = client.get("orphaned-key")
+
+    # Should return the cached orphan entry
+    assert result.value == {"value": "test_data"}
+    assert result.key == "existing-key"  # Original key from entry
 
 
 def test_orphan_status_false_does_not_prepend_in_history(

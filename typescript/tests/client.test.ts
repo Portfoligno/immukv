@@ -435,22 +435,49 @@ describe('ImmuKVClient', () => {
 
   describe('Orphan status boolean checks', () => {
     test('is_orphaned=false does not trigger orphan fallback in get()', async () => {
-      // Create an entry
-      const entry = await client.set('test-key', { value: 'test_data' });
+      // Create an entry and set it as orphan status with isOrphaned=false
+      const entry = await client.set('test-key', { value: 'orphan_data' });
 
-      // Set orphan status with isOrphaned=false
+      // Set read-only mode so orphan fallback would be checked
+      client['canWrite'] = false;
+
       client['latestOrphanStatus'] = {
-        isOrphaned: false, // Explicitly false
+        isOrphaned: false, // Explicitly false - repair completed
         orphanKey: 'nonexistent-key',
         orphanEntry: entry,
         checkedAt: 0,
       };
 
-      // get() on nonexistent key should throw KeyNotFoundError
-      // NOT return the orphan entry
+      // get() should throw KeyNotFoundError, NOT return the orphan entry
+      // Even though all other conditions match (read-only, key matches, entry exists)
+      // isOrphaned=false should prevent the orphan fallback
       await expect(client.get('nonexistent-key')).rejects.toThrow(
         "Key 'nonexistent-key' not found"
       );
+    });
+
+    test('is_orphaned=true returns orphan entry in get()', async () => {
+      // Create an entry
+      const entry = await client.set('existing-key', { value: 'test_data' });
+
+      // Set read-only mode
+      client['canWrite'] = false;
+
+      // Simulate orphan status with isOrphaned=true for a nonexistent key
+      client['latestOrphanStatus'] = {
+        isOrphaned: true, // Explicitly true - orphan exists
+        orphanKey: 'orphaned-key',
+        orphanEntry: entry,
+        checkedAt: 0,
+      };
+
+      // get() on the orphaned key should return the orphan entry (not throw)
+      // Even though the key object doesn't exist in S3
+      const result = await client.get('orphaned-key');
+
+      // Should return the cached orphan entry
+      expect(result.value).toEqual({ value: 'test_data' });
+      expect(result.key).toBe('existing-key'); // Original key from entry
     });
 
     test('is_orphaned=false does not prepend orphan entry in history()', async () => {
