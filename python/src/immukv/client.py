@@ -393,7 +393,7 @@ class ImmuKVClient(Generic[K, V]):
                     list_params["VersionIdMarker"] = version_id_marker  # type: ignore[misc]
 
                 page = self.s3.list_object_versions(**list_params)  # type: ignore[misc]
-                versions = page.get("Versions") or []
+                versions = page.get("Versions") if page.get("Versions") is not None else []
                 for version in versions:
                     if version["Key"] != key_path:
                         continue
@@ -468,7 +468,7 @@ class ImmuKVClient(Generic[K, V]):
                     list_params["VersionIdMarker"] = version_id_marker  # type: ignore[misc]
 
                 page = self.s3.list_object_versions(**list_params)  # type: ignore[misc]
-                versions = page.get("Versions") or []
+                versions = page.get("Versions") if page.get("Versions") is not None else []
                 for version in versions:
                     if version["Key"] != self.log_key:
                         continue
