@@ -35,13 +35,34 @@ ValueParser = Callable[[JSONValue], V]
 
 
 def get_str(data: Dict[str, JSONValue], key: str) -> str:
-    """Extract string field from parsed JSON dict."""
-    return cast(str, data[key])
+    """Extract string field from parsed JSON dict.
+
+    Validates that the field is actually a string at runtime.
+
+    Raises:
+        TypeError: If field is not a string
+        KeyError: If field is missing
+    """
+    value = data[key]
+    if not isinstance(value, str):
+        raise TypeError(f"Expected string for field '{key}', got {type(value).__name__}: {value!r}")
+    return value
 
 
 def get_int(data: Dict[str, JSONValue], key: str) -> int:
-    """Extract int field from parsed JSON dict."""
-    return cast(int, data[key])
+    """Extract int field from parsed JSON dict.
+
+    Validates that the field is actually an int at runtime.
+    Note: bool is a subclass of int in Python, so we explicitly reject booleans.
+
+    Raises:
+        TypeError: If field is not an int or is a bool
+        KeyError: If field is missing
+    """
+    value = data[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"Expected int for field '{key}', got {type(value).__name__}: {value!r}")
+    return value
 
 
 def get_optional_str(data: Dict[str, JSONValue], key: str) -> Optional[str]:

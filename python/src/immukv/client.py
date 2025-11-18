@@ -320,7 +320,7 @@ class ImmuKVClient(Generic[K, V]):
                 # Key object doesn't exist - check for orphan fallback
                 if (
                     self._latest_orphan_status is not None
-                    and self._latest_orphan_status.get("is_orphaned") is not None
+                    and self._latest_orphan_status.get("is_orphaned") is True
                     and self._latest_orphan_status.get("orphan_key") == key
                     and self._latest_orphan_status.get("orphan_entry") is not None
                     and (self._can_write is False or self.config.read_only)
@@ -369,7 +369,7 @@ class ImmuKVClient(Generic[K, V]):
         if (
             before_version_id is None
             and self._latest_orphan_status is not None
-            and self._latest_orphan_status.get("is_orphaned") is not None
+            and self._latest_orphan_status.get("is_orphaned") is True
             and self._latest_orphan_status.get("orphan_key") == key
             and self._latest_orphan_status.get("orphan_entry") is not None
         ):

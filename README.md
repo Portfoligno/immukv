@@ -330,11 +330,6 @@ npm install
 npm test
 ```
 
-## Design Documentation
-
-For detailed design specifications, see the design document at:
-`../d85065f19dcc645bd1fd14cb2beb92be/immukv-simple-versioning-design.md`
-
 ## License
 
 MIT License - see LICENSE file for details

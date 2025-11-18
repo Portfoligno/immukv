@@ -432,4 +432,86 @@ describe('ImmuKVClient', () => {
       defaultClient.close();
     });
   });
+
+  describe('Orphan status boolean checks', () => {
+    test('is_orphaned=false does not trigger orphan fallback in get()', async () => {
+      // Create an entry
+      const entry = await client.set('test-key', { value: 'test_data' });
+
+      // Set orphan status with isOrphaned=false
+      client['latestOrphanStatus'] = {
+        isOrphaned: false, // Explicitly false
+        orphanKey: 'nonexistent-key',
+        orphanEntry: entry,
+      };
+
+      // get() on nonexistent key should throw KeyNotFoundError
+      // NOT return the orphan entry
+      await expect(client.get('nonexistent-key')).rejects.toThrow(
+        "Key 'nonexistent-key' not found"
+      );
+    });
+
+    test('is_orphaned=false does not prepend orphan entry in history()', async () => {
+      // Create a key with history
+      await client.set('test-key', { value: 'v1' });
+      const entry2 = await client.set('test-key', { value: 'v2' });
+
+      // Set orphan status with isOrphaned=false
+      client['latestOrphanStatus'] = {
+        isOrphaned: false, // Explicitly false
+        orphanKey: 'test-key',
+        orphanEntry: entry2,
+      };
+
+      // Get history - should NOT include orphan entry as first item
+      const history = await client.history('test-key');
+
+      // Should have 2 entries (v2 and v1), NOT 3 (orphan + v2 + v1)
+      expect(history).toHaveLength(2);
+      expect(history[0].value).toEqual({ value: 'v2' });
+      expect(history[1].value).toEqual({ value: 'v1' });
+    });
+
+    test('is_orphaned=true prepends orphan entry in history()', async () => {
+      // Create a key with history
+      await client.set('test-key', { value: 'v1' });
+      const entry2 = await client.set('test-key', { value: 'v2' });
+
+      // Set orphan status with isOrphaned=true
+      client['latestOrphanStatus'] = {
+        isOrphaned: true, // Explicitly true
+        orphanKey: 'test-key',
+        orphanEntry: entry2,
+      };
+
+      // Get history - should include orphan entry as first item
+      const history = await client.history('test-key');
+
+      // Should have 3 entries: orphan (v2) + v2 + v1
+      // Note: This creates a duplicate entry, which is the expected behavior
+      // when orphan repair hasn't completed yet
+      expect(history).toHaveLength(3);
+      expect(history[0].value).toEqual({ value: 'v2' }); // Orphan entry
+      expect(history[1].value).toEqual({ value: 'v2' }); // Actual latest
+      expect(history[2].value).toEqual({ value: 'v1' });
+    });
+
+    test('is_orphaned=undefined does not trigger orphan fallback', async () => {
+      // Create an entry
+      const entry = await client.set('test-key', { value: 'test_data' });
+
+      // Set orphan status with isOrphaned=undefined (missing field)
+      client['latestOrphanStatus'] = {
+        isOrphaned: undefined, // Explicitly undefined
+        orphanKey: 'nonexistent-key',
+        orphanEntry: entry,
+      } as any;
+
+      // get() on nonexistent key should throw KeyNotFoundError
+      await expect(client.get('nonexistent-key')).rejects.toThrow(
+        "Key 'nonexistent-key' not found"
+      );
+    });
+  });
 });
