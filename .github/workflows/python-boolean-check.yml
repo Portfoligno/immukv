@@ -34,23 +34,62 @@ jobs:
             Python must follow the same strict standard.
 
             **Violations to check:**
-            - `if optional_value:` → should be `if optional_value is not None:`
-            - `if not optional_value:` → should be `if optional_value is None:`
-            - `value if optional_value else default` → should be `value if optional_value is not None else default`
+            - `if optional_value:` → requires explicit check (see fixing guide below)
+            - `if not optional_value:` → requires explicit check (see fixing guide below)
+            - `value if optional_value else default` → requires explicit check (see fixing guide below)
 
             Where `optional_value` has type `Optional[T]` for any T (including str, objects, etc.)
+
+            **CRITICAL: Three-Case Problem - the correct fix depends on semantic intent:**
+
+            The same syntax `if dict.get("field"):` can represent THREE different intentions:
+            1. **Check if value is truthy** - Intended: {truthy} vs {falsy, None}
+            2. **Check if key exists** - Intended: {truthy, falsy} vs {None}
+            3. **Check if not explicitly falsy** - Intended: {truthy, None} vs {falsy}
+
+            The implicit check always produces {truthy} vs {falsy, None}, which only matches Case 1.
 
             **DO NOT rationalize violations as "safe":**
             - "ETags cannot be empty" - IRRELEVANT, must use `is not None`
             - "Version IDs are never empty" - IRRELEVANT, must use `is not None`
             - "This type doesn't have falsy values" - IRRELEVANT, must use `is not None`
 
-            The rule is: if the type is Optional[T], use explicit None checks. No exceptions.
+            The rule is: if the type is Optional[T], use explicit checks. No exceptions.
+
+            **How to determine the correct fix:**
+
+            For each violation, examine the context to determine which case applies:
+            - What does None mean semantically? (unset/unknown vs disabled/empty)
+            - Should falsy values (False/0/""/[]) execute or skip?
+            - Check TypeScript implementation if available (=== true vs !== undefined vs !== false)
+
+            **Correct explicit forms by case:**
+
+            **For Optional[bool]:**
+            - Case 1 (truthy): `if dict.get("field") is True:`
+            - Case 2 (exists): `if dict.get("field") is not None:`
+            - Case 3 (not False): `if dict.get("field") is not False:`
+
+            **For Optional[int] (where 0 is falsy):**
+            - Case 1 (truthy): `if dict.get("field") not in (0, None):`
+            - Case 2 (exists): `if dict.get("field") is not None:`
+            - Case 3 (not zero): `if dict.get("field") != 0:`
+
+            **For Optional[str] (where "" is falsy):**
+            - Case 1 (truthy): `if dict.get("field") not in ("", None):`
+            - Case 2 (exists): `if dict.get("field") is not None:`
+            - Case 3 (not empty): `if dict.get("field") != "":`
+
+            **For Optional[List[T]] (where [] is falsy):**
+            - Case 1 (truthy): `if dict.get("field") not in ([], None):`
+            - Case 2 (exists): `if dict.get("field") is not None:`
+            - Case 3 (not empty): `if dict.get("field") != []:`
 
             **Task:**
             1. Search for all Python files with Optional type annotations
             2. Identify ALL implicit truthiness checks on Optional types
-            3. Create a detailed report of all violations found (file path, line number, code snippet)
+            3. For each violation, determine the field's type (bool, int, str, List, etc.)
+            4. Create a detailed report of all violations (file path, line number, code snippet, field type)
 
             **If violations found:**
             - First check if an open issue with title "Python boolean violations detected" already exists
@@ -58,9 +97,29 @@ jobs:
             - If no such issue exists, create a GitHub issue with title "Python boolean violations detected"
             - Include in the issue body:
               1. Start with: "@claude Please fix these violations:"
-              2. The detailed violation report (file path, line number, code snippet for each violation)
-              3. Step-by-step instructions:
-                 - Fix all violations by replacing with explicit `is not None` or `is None` checks
+              2. The detailed violation report (file path, line number, code snippet, field type for each violation)
+              3. **CRITICAL fixing instructions - three-case problem:**
+
+                 For EACH violation, you MUST:
+                 a) **Determine the semantic intent** by examining:
+                    - Surrounding code context
+                    - What None means for this field (unset vs disabled)
+                    - Whether falsy values should execute or skip
+                    - TypeScript implementation if available (match the pattern: === true, !== undefined, !== false)
+
+                 b) **Choose the correct explicit form** based on intent:
+                    - If checking "is truthy" (Case 1): Use appropriate form from table above
+                    - If checking "exists" (Case 2): Use `is not None`
+                    - If checking "not explicitly falsy" (Case 3): Use appropriate form from table above
+
+                 c) **DO NOT blindly use `is not None` for everything** - this only works for Case 2
+
+                 d) **Example mistake to avoid:**
+                    - Original: `if dict.get("is_orphaned"):`
+                    - WRONG: `if dict.get("is_orphaned") is not None:` (assumes Case 2)
+                    - CORRECT: `if dict.get("is_orphaned") is True:` (if intent is Case 1)
+
+              4. After fixing:
                  - Commit and push your changes
                  - Check CI status - if it fails, fix the issues and push again
                  - Once CI passes, you MUST execute `gh pr create` to create the pull request. You have the necessary permissions - run the command directly, do not just provide a link
