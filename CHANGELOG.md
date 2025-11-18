@@ -5,6 +5,17 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.16] - 2025-11-19
+
+### Fixed
+
+- **CRITICAL**: Python: Fixed bug where cached orphan entries could be incorrectly returned when they should not be
+  - Affected `get()` and `history()` methods in read-only mode
+
+### Changed
+
+- Python: Internal code quality improvements for strict type checking compliance
+
 ## [0.1.15] - 2025-11-16
 
 ### Fixed
