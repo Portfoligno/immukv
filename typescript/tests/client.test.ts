@@ -443,6 +443,7 @@ describe('ImmuKVClient', () => {
         isOrphaned: false, // Explicitly false
         orphanKey: 'nonexistent-key',
         orphanEntry: entry,
+        checkedAt: 0,
       };
 
       // get() on nonexistent key should throw KeyNotFoundError
@@ -462,15 +463,16 @@ describe('ImmuKVClient', () => {
         isOrphaned: false, // Explicitly false
         orphanKey: 'test-key',
         orphanEntry: entry2,
+        checkedAt: 0,
       };
 
       // Get history - should NOT include orphan entry as first item
-      const history = await client.history('test-key');
+      const [entries] = await client.history('test-key', null, null);
 
       // Should have 2 entries (v2 and v1), NOT 3 (orphan + v2 + v1)
-      expect(history).toHaveLength(2);
-      expect(history[0].value).toEqual({ value: 'v2' });
-      expect(history[1].value).toEqual({ value: 'v1' });
+      expect(entries).toHaveLength(2);
+      expect(entries[0].value).toEqual({ value: 'v2' });
+      expect(entries[1].value).toEqual({ value: 'v1' });
     });
 
     test('is_orphaned=true prepends orphan entry in history()', async () => {
@@ -483,18 +485,19 @@ describe('ImmuKVClient', () => {
         isOrphaned: true, // Explicitly true
         orphanKey: 'test-key',
         orphanEntry: entry2,
+        checkedAt: 0,
       };
 
       // Get history - should include orphan entry as first item
-      const history = await client.history('test-key');
+      const [entries] = await client.history('test-key', null, null);
 
       // Should have 3 entries: orphan (v2) + v2 + v1
       // Note: This creates a duplicate entry, which is the expected behavior
       // when orphan repair hasn't completed yet
-      expect(history).toHaveLength(3);
-      expect(history[0].value).toEqual({ value: 'v2' }); // Orphan entry
-      expect(history[1].value).toEqual({ value: 'v2' }); // Actual latest
-      expect(history[2].value).toEqual({ value: 'v1' });
+      expect(entries).toHaveLength(3);
+      expect(entries[0].value).toEqual({ value: 'v2' }); // Orphan entry
+      expect(entries[1].value).toEqual({ value: 'v2' }); // Actual latest
+      expect(entries[2].value).toEqual({ value: 'v1' });
     });
 
     test('is_orphaned=undefined does not trigger orphan fallback', async () => {

@@ -478,13 +478,14 @@ def test_default_overrides_is_none(s3_bucket: str) -> None:
 
 def test_orphan_status_false_does_not_return_orphan(client: ImmuKVClient[str, object]) -> None:
     """Test that is_orphaned=False does not trigger orphan fallback in get()."""
-    from immukv.exceptions import KeyNotFoundError
+    from immukv.types import KeyNotFoundError
 
     # Set orphan status with is_orphaned=False
     client._latest_orphan_status = {
         "is_orphaned": False,  # Explicitly False
         "orphan_key": "test-key",
         "orphan_entry": client.set("test-key", {"value": "orphan_data"}),
+        "checked_at": 0,
     }
 
     # Delete the key object to simulate missing key
@@ -508,6 +509,7 @@ def test_orphan_status_true_returns_orphan_in_readonly(
         "is_orphaned": True,  # Explicitly True
         "orphan_key": "test-key",
         "orphan_entry": entry,
+        "checked_at": 0,
     }
 
     # Set read-only mode
@@ -534,15 +536,16 @@ def test_orphan_status_false_does_not_prepend_in_history(
         "is_orphaned": False,  # Explicitly False
         "orphan_key": "test-key",
         "orphan_entry": entry2,
+        "checked_at": 0,
     }
 
     # Get history - should NOT include orphan entry as first item
-    history = client.history("test-key")
+    entries, _ = client.history("test-key", None, None)
 
     # Should have 2 entries (v2 and v1), NOT 3 (orphan + v2 + v1)
-    assert len(history) == 2
-    assert history[0].value == {"value": "v2"}
-    assert history[1].value == {"value": "v1"}
+    assert len(entries) == 2
+    assert entries[0].value == {"value": "v2"}
+    assert entries[1].value == {"value": "v1"}
 
 
 def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object]) -> None:
@@ -556,15 +559,16 @@ def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object
         "is_orphaned": True,  # Explicitly True
         "orphan_key": "test-key",
         "orphan_entry": entry2,
+        "checked_at": 0,
     }
 
     # Get history - should include orphan entry as first item
-    history = client.history("test-key")
+    entries, _ = client.history("test-key", None, None)
 
     # Should have 3 entries: orphan (v2) + v2 + v1
     # Note: This creates a duplicate entry, which is the expected behavior
     # when orphan repair hasn't completed yet
-    assert len(history) == 3
-    assert history[0].value == {"value": "v2"}  # Orphan entry
-    assert history[1].value == {"value": "v2"}  # Actual latest
-    assert history[2].value == {"value": "v1"}
+    assert len(entries) == 3
+    assert entries[0].value == {"value": "v2"}  # Orphan entry
+    assert entries[1].value == {"value": "v2"}  # Actual latest
+    assert entries[2].value == {"value": "v1"}
