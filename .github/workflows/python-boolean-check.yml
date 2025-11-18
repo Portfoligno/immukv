@@ -112,13 +112,6 @@ jobs:
                     - If checking "exists" (Case 2): Use `is not None`
                     - If checking "not explicitly falsy" (Case 3): Use appropriate form from table above
 
-                 c) **DO NOT blindly use `is not None` for everything** - this only works for Case 2
-
-                 d) **Example mistake to avoid:**
-                    - Original: `if dict.get("is_orphaned"):`
-                    - WRONG: `if dict.get("is_orphaned") is not None:` (assumes Case 2)
-                    - CORRECT: `if dict.get("is_orphaned") is True:` (if intent is Case 1)
-
               4. After fixing:
                  - Commit and push your changes
                  - Check CI status - if it fails, fix the issues and push again
