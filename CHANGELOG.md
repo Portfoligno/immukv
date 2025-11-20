@@ -5,6 +5,42 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.17] - 2025-11-21
+
+### Changed
+
+- **BREAKING**: Client constructor now requires both `ValueDecoder` and `ValueEncoder` parameters
+  - Python: `ImmuKVClient(config, value_decoder, value_encoder)`
+  - TypeScript: `new ImmuKVClient(config, valueDecoder, valueEncoder)`
+  - Renamed `ValueParser` to `ValueDecoder` for clarity
+  - Added `ValueEncoder` for symmetric serialization
+- **BREAKING**: TypeScript: All optional fields now use `| undefined` instead of `| null`
+  - Affects method parameters: `history()`, `logEntries()`, `listKeys()`
+  - Affects return types and Entry fields
+  - Aligns with TypeScript idioms where `?` means `| undefined`
+- Python: All client instance fields now private (prefixed with underscore)
+  - `_config`, `_s3`, `_log_key`, `_value_decoder`, `_value_encoder`
+- Internal: Reorganized package structure with `_internal/` modules
+  - Moved factory functions and helper types to internal packages
+  - Reduced public API surface to core types only
+
+### Added
+
+- Public API now exports all branded types for type annotations
+  - `LogVersionId`, `KeyVersionId`, `KeyObjectETag`, `Hash`, `Sequence`, `TimestampMs`
+  - `S3Credentials`, `S3Overrides` config helper types
+- Cross-language JSON consistency
+  - Python: Optional fields with `None` values are omitted from JSON
+  - TypeScript: Optional fields with `undefined` values are omitted from JSON
+  - Both languages produce identical JSON structure
+  - Note: Only applies to log entry metadata fields (`previous_version_id`, `previous_key_object_etag`); the `value` field from `ValueEncoder` is stored as-is
+
+### Fixed
+
+- CI: Python boolean check workflow rewritten with clearer auto-coercion rule
+  - Prevents false positives from `is True`, `== value`, and other explicit operators
+  - Now correctly distinguishes auto-coercion from explicit boolean operators
+
 ## [0.1.16] - 2025-11-19
 
 ### Fixed
@@ -199,6 +235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.17]: https://github.com/Portfoligno/immukv/releases/tag/0.1.17
+[0.1.16]: https://github.com/Portfoligno/immukv/releases/tag/0.1.16
 [0.1.15]: https://github.com/Portfoligno/immukv/releases/tag/0.1.15
 [0.1.14]: https://github.com/Portfoligno/immukv/releases/tag/0.1.14
 [0.1.13]: https://github.com/Portfoligno/immukv/releases/tag/0.1.13
