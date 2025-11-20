@@ -1,6 +1,6 @@
 {
   "name": "immukv",
-  "version": "0.1.17",
+  "version": "0.1.18-dev",
   "description": "Lightweight immutable key-value store using S3 versioning",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
