@@ -16,12 +16,13 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { ImmuKVClient } from '../src/client';
 import { Config, KeyNotFoundError } from '../src/types';
-import { JSONValue, ValueParser } from '../src/jsonHelpers';
+import { JSONValue, ValueDecoder, ValueEncoder } from '../src/jsonHelpers';
 
 const integrationTestEnabled = process.env.IMMUKV_INTEGRATION_TEST === 'true';
 
-// Identity parser for tests (value is any, so just pass through)
-const identityParser: ValueParser<any> = (value: JSONValue) => value;
+// Identity decoder and encoder for tests (value is any, so just pass through)
+const identityDecoder: ValueDecoder<any> = (value: JSONValue) => value;
+const identityEncoder: ValueEncoder<any> = (value: any) => value as JSONValue;
 
 describe('ImmuKVClient', () => {
   let s3Client: S3Client;
@@ -76,7 +77,7 @@ describe('ImmuKVClient', () => {
       },
     };
 
-    client = new ImmuKVClient(config, identityParser);
+    client = new ImmuKVClient(config, identityDecoder, identityEncoder);
   });
 
   afterEach(async () => {
@@ -399,7 +400,7 @@ describe('ImmuKVClient', () => {
         readOnly: true,
       };
 
-      const roClient = new ImmuKVClient(roConfig, identityParser);
+      const roClient = new ImmuKVClient(roConfig, identityDecoder, identityEncoder);
 
       const entry = await roClient.get('readonly-test');
       expect(entry.value).toEqual({ value: 'data' });
@@ -420,7 +421,7 @@ describe('ImmuKVClient', () => {
       };
 
       // Should not throw when creating client with overrides
-      const customClient = new ImmuKVClient(customConfig, identityParser);
+      const customClient = new ImmuKVClient(customConfig, identityDecoder, identityEncoder);
       customClient.close();
     });
 
@@ -432,7 +433,7 @@ describe('ImmuKVClient', () => {
       };
 
       // Should not throw when creating client without overrides
-      const defaultClient = new ImmuKVClient(defaultConfig, identityParser);
+      const defaultClient = new ImmuKVClient(defaultConfig, identityDecoder, identityEncoder);
       defaultClient.close();
     });
   });

@@ -13,7 +13,7 @@ import type {
   Sequence,
 } from './types';
 import { KeyNotFoundError, ReadOnlyError } from './types';
-import type { JSONValue, ValueParser } from './jsonHelpers';
+import type { JSONValue, ValueDecoder, ValueEncoder } from './jsonHelpers';
 import { BrandedS3Client } from './internal/s3Client';
 import { readBodyAsJson } from './internal/s3Helpers';
 import { stringifyCanonical } from './internal/jsonHelpers';
@@ -44,12 +44,13 @@ export class ImmuKVClient<K extends string = string, V = any> {
   private config: Config;
   private s3: BrandedS3Client;
   private logKey: S3KeyPath<LogKey>;
-  private valueParser: ValueParser<V>;
+  private valueDecoder: ValueDecoder<V>;
+  private valueEncoder: ValueEncoder<V>;
   private lastRepairCheckMs: number = 0;
   private canWrite?: boolean;
   private latestOrphanStatus?: OrphanStatus<K, V>;
 
-  constructor(config: Config, valueParser: ValueParser<V>) {
+  constructor(config: Config, valueDecoder: ValueDecoder<V>, valueEncoder: ValueEncoder<V>) {
     this.config = {
       repairCheckIntervalMs: 300000,
       readOnly: false,
@@ -64,7 +65,8 @@ export class ImmuKVClient<K extends string = string, V = any> {
       })
     );
     this.logKey = S3KeyPaths.forLog(config.s3Prefix);
-    this.valueParser = valueParser;
+    this.valueDecoder = valueDecoder;
+    this.valueEncoder = valueEncoder;
   }
 
   /**
@@ -111,10 +113,13 @@ export class ImmuKVClient<K extends string = string, V = any> {
         sequence !== undefined ? sequenceNext<K>(sequence) : sequenceFromJson<K>(0);
       const timestampMs = timestampNow<K>();
 
-      const entryForHash: LogEntryForHash<K, V> = {
+      // Encode value to JSON
+      const encodedValue = this.valueEncoder(value);
+
+      const entryForHash: LogEntryForHash<K, JSONValue> = {
         sequence: newSequence,
         key,
-        value,
+        value: encodedValue,
         timestampMs,
         previousHash: prevHash,
       };
@@ -123,7 +128,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
       const logEntry = {
         sequence: newSequence,
         key,
-        value,
+        value: encodedValue,
         timestamp_ms: timestampMs,
         previous_version_id: prevVersionId,
         previous_hash: prevHash,
@@ -151,7 +156,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const keyData = {
           sequence: newSequence,
           key,
-          value,
+          value: encodedValue,
           timestamp_ms: timestampMs,
           log_version_id: newLogVersionId,
           hash: entryHash,
@@ -228,7 +233,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
       return {
         key: data.key as K,
-        value: this.valueParser(data.value),
+        value: this.valueDecoder(data.value),
         timestampMs: timestampFromJson(data.timestamp_ms as number),
         versionId: data.log_version_id as LogVersionId<K>,
         sequence: sequenceFromJson(data.sequence as number),
@@ -268,7 +273,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
       return {
         key: data.key as K,
-        value: this.valueParser(data.value),
+        value: this.valueDecoder(data.value),
         timestampMs: timestampFromJson(data.timestamp_ms as number),
         versionId,
         sequence: sequenceFromJson(data.sequence as number),
@@ -346,7 +351,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
           const entry: Entry<K, V> = {
             key: data.key as K,
-            value: this.valueParser(data.value),
+            value: this.valueDecoder(data.value),
             timestampMs: timestampFromJson(data.timestamp_ms as number),
             versionId: data.log_version_id as LogVersionId<K>,
             sequence: sequenceFromJson(data.sequence as number),
@@ -422,7 +427,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
           const entry: Entry<K, V> = {
             key: data.key as K,
-            value: this.valueParser(data.value),
+            value: this.valueDecoder(data.value),
             timestampMs: timestampFromJson(data.timestamp_ms as number),
             versionId: logVersionId,
             sequence: sequenceFromJson(data.sequence as number),
@@ -506,10 +511,11 @@ export class ImmuKVClient<K extends string = string, V = any> {
    * Verify single entry integrity.
    */
   async verify(entry: Entry<K, V>): Promise<boolean> {
-    const entryForHash: LogEntryForHash<K, V> = {
+    // Encode value back to JSON for hash verification
+    const entryForHash: LogEntryForHash<K, JSONValue> = {
       sequence: entry.sequence,
       key: entry.key,
-      value: entry.value,
+      value: this.valueEncoder(entry.value),
       timestampMs: entry.timestampMs,
       previousHash: entry.previousHash,
     };
@@ -556,7 +562,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
   // Private helper methods
 
-  private calculateHash(entryForHash: LogEntryForHash<K, V>): Hash<K> {
+  private calculateHash(entryForHash: LogEntryForHash<K, JSONValue>): Hash<K> {
     return hashCompute(entryForHash);
   }
 
@@ -580,7 +586,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
       const latestEntry: Entry<K, V> = {
         key: data.key as K,
-        value: this.valueParser(data.value),
+        value: this.valueDecoder(data.value),
         timestampMs: timestampFromJson(data.timestamp_ms as number),
         versionId: currentVersionId,
         sequence: sequenceFromJson(data.sequence as number),
@@ -655,10 +661,11 @@ export class ImmuKVClient<K extends string = string, V = any> {
     const currentTimeMs = Date.now();
     const keyPath = S3KeyPaths.forKey(this.config.s3Prefix, latestLog.key);
 
+    // Encode value back to JSON for repair
     const repairData = {
       sequence: latestLog.sequence,
       key: latestLog.key,
-      value: latestLog.value,
+      value: this.valueEncoder(latestLog.value),
       timestamp_ms: latestLog.timestampMs,
       log_version_id: latestLog.versionId,
       hash: latestLog.hash,

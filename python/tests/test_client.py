@@ -25,9 +25,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def identity_parser(value: JSONValue) -> object:
-    """Identity parser that returns the JSONValue as-is."""
+def identity_decoder(value: JSONValue) -> object:
+    """Identity decoder that returns the JSONValue as-is."""
     return value
+
+
+def identity_encoder(value: object) -> JSONValue:
+    """Identity encoder that returns the value as JSONValue."""
+    return value  # type: ignore[return-value]
 
 
 @pytest.fixture(scope="session")  # type: ignore[misc]
@@ -37,7 +42,7 @@ def raw_s3() -> S3Client:
     # Use environment variables if set, otherwise default to test credentials
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
-    return boto3.client(  # type: ignore[return-value]
+    return boto3.client(  # type: ignore[return-value,no-any-return,misc]
         "s3",
         endpoint_url=endpoint_url,
         aws_access_key_id=access_key,
@@ -110,7 +115,7 @@ def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
         ),
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
     with client_instance as client:
         yield client
 
@@ -423,14 +428,14 @@ def test_read_only_mode(client: ImmuKVClient[str, object]) -> None:
 
     # Create a read-only client
     config = Config(
-        s3_bucket=client.config.s3_bucket,
-        s3_region=client.config.s3_region,
-        s3_prefix=client.config.s3_prefix,
+        s3_bucket=client._config.s3_bucket,
+        s3_region=client._config.s3_region,
+        s3_prefix=client._config.s3_prefix,
         read_only=True,
-        overrides=client.config.overrides,
+        overrides=client._config.overrides,
     )
 
-    ro_client: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
+    ro_client: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
     with ro_client:
         # Read should work
         entry = ro_client.get("readonly-test")
@@ -451,11 +456,11 @@ def test_custom_endpoint_url_config(s3_bucket: str) -> None:
     )
 
     # Client creation should succeed
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
 
     # Verify overrides are stored in config
-    assert client_instance.config.overrides is not None
-    assert client_instance.config.overrides.endpoint_url == "http://localhost:4566"
+    assert client_instance._config.overrides is not None
+    assert client_instance._config.overrides.endpoint_url == "http://localhost:4566"
 
     # Note: Actual operations would require MinIO/moto running at that endpoint.
     # This test verifies the config accepts and stores the overrides correctly.
@@ -470,10 +475,10 @@ def test_default_overrides_is_none(s3_bucket: str) -> None:
         s3_prefix="test/",
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
 
     # Should default to None (uses AWS S3)
-    assert client_instance.config.overrides is None
+    assert client_instance._config.overrides is None
 
 
 def test_orphan_status_false_does_not_return_orphan(client: ImmuKVClient[str, object]) -> None:

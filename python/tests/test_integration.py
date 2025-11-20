@@ -29,9 +29,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def identity_parser(value: JSONValue) -> object:
-    """Identity parser that returns the JSONValue as-is."""
+def identity_decoder(value: JSONValue) -> object:
+    """Identity decoder that returns the JSONValue as-is."""
     return value
+
+
+def identity_encoder(value: object) -> JSONValue:
+    """Identity encoder that returns the value as JSONValue."""
+    return value  # type: ignore[return-value]
 
 
 @pytest.fixture(scope="session")  # type: ignore[misc]
@@ -41,7 +46,7 @@ def raw_s3() -> S3Client:
     # Use environment variables if set, otherwise default to test credentials
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
-    return boto3.client(  # type: ignore[return-value]
+    return boto3.client(  # type: ignore[return-value,no-any-return,misc]
         "s3",
         endpoint_url=endpoint_url,
         aws_access_key_id=access_key,
@@ -114,7 +119,9 @@ def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
         ),
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_parser)
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
     with client_instance as client:
         yield client
 
@@ -143,8 +150,8 @@ def test_real_etag_generation_and_validation(
     entry = client.set("key1", {"data": "value"})
 
     # Get the key object and check ETag
-    key_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/key1.json")
-    response = s3_client.head_object(bucket=client.config.s3_bucket, key=key_path)
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
+    response = s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
 
     etag: str = response["ETag"]
     assert etag.startswith('"') and etag.endswith('"')
@@ -158,13 +165,13 @@ def test_conditional_write_if_match_succeeds(
     client.set("key1", {"version": 1})
 
     # Get current ETag
-    key_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/key1.json")
-    response = s3_client.head_object(bucket=client.config.s3_bucket, key=key_path)
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
+    response = s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
     correct_etag = response["ETag"]
 
     # Write with IfMatch should succeed
     s3_client.put_object(
-        bucket=client.config.s3_bucket,
+        bucket=client._config.s3_bucket,
         key=key_path,
         body=b'{"test": "update"}',
         if_match=correct_etag,
@@ -178,10 +185,10 @@ def test_conditional_write_if_match_fails(
     client.set("key1", {"version": 1})
 
     # Write with wrong ETag should fail
-    key_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/key1.json")
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
     with pytest.raises(ClientError) as exc_info:  # type: ignore[misc]
         s3_client.put_object(
-            bucket=client.config.s3_bucket,
+            bucket=client._config.s3_bucket,
             key=key_path,
             body=b'{"test": "update"}',
             if_match='"wrong-etag"',
@@ -195,9 +202,9 @@ def test_conditional_write_if_none_match_creates_new(
 ) -> None:
     """Verify IfNoneMatch='*' succeeds when key doesn't exist."""
     # Write with IfNoneMatch='*' should succeed for new key
-    key_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/new-key.json")
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/new-key.json")
     s3_client.put_object(
-        bucket=client.config.s3_bucket,
+        bucket=client._config.s3_bucket,
         key=key_path,
         body=b'{"test": "create"}',
         if_none_match="*",
@@ -211,10 +218,10 @@ def test_conditional_write_if_none_match_fails_when_exists(
     client.set("existing-key", {"version": 1})
 
     # Write with IfNoneMatch='*' should fail
-    key_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/existing-key.json")
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/existing-key.json")
     with pytest.raises(ClientError) as exc_info:  # type: ignore[misc]
         s3_client.put_object(
-            bucket=client.config.s3_bucket,
+            bucket=client._config.s3_bucket,
             key=key_path,
             body=b'{"test": "create"}',
             if_none_match="*",
@@ -233,8 +240,8 @@ def test_list_object_versions_returns_proper_order(
     entry3 = client.set("key1", {"version": 3})
 
     # List versions
-    prefix_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/key1.json")
-    response = s3_client.list_object_versions(bucket=client.config.s3_bucket, prefix=prefix_path)
+    prefix_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
+    response = s3_client.list_object_versions(bucket=client._config.s3_bucket, prefix=prefix_path)
 
     versions = response["Versions"]
     assert versions is not None
@@ -251,8 +258,8 @@ def test_log_object_structure_matches_spec(
     entry = client.set("key1", {"data": "value"})
 
     # Read log object directly from S3
-    log_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}_log.json")
-    response = s3_client.get_object(bucket=client.config.s3_bucket, key=log_path, version_id=None)
+    log_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}_log.json")
+    response = s3_client.get_object(bucket=client._config.s3_bucket, key=log_path, version_id=None)
 
     log_data = read_body_as_json(response["Body"])
 
@@ -284,8 +291,8 @@ def test_key_object_structure_matches_spec(
     entry = client.set("key1", {"data": "value"})
 
     # Read key object directly from S3
-    key_path = cast(S3KeyPath[str], f"{client.config.s3_prefix}keys/key1.json")
-    response = s3_client.get_object(bucket=client.config.s3_bucket, key=key_path, version_id=None)
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
+    response = s3_client.get_object(bucket=client._config.s3_bucket, key=key_path, version_id=None)
 
     key_data = read_body_as_json(response["Body"])
 
@@ -329,7 +336,8 @@ def test_none_values_omitted_from_json(s3_bucket: str, s3_client: BrandedS3Clien
                 force_path_style=True,
             ),
         ),
-        value_parser=lambda v: cast(dict[str, object], v),
+        value_decoder=lambda v: cast(dict[str, object], v),
+        value_encoder=lambda v: cast(JSONValue, v),
     )
 
     # First write - creates genesis entry with previous_version_id=None, previous_key_object_etag=None
@@ -388,7 +396,8 @@ def test_missing_optional_fields_handled_correctly(s3_bucket: str, s3_client: Br
                 force_path_style=True,
             ),
         ),
-        value_parser=lambda v: cast(dict[str, object], v),
+        value_decoder=lambda v: cast(dict[str, object], v),
+        value_encoder=lambda v: cast(JSONValue, v),
     )
 
     entry = client.set("test-key", {"value": "test"})

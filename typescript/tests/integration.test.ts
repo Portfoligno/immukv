@@ -23,7 +23,11 @@ import { ImmuKVClient, Config, Entry } from '../src';
 const integrationTestEnabled = process.env.IMMUKV_INTEGRATION_TEST === 'true';
 const skipMessage = 'Integration tests require IMMUKV_INTEGRATION_TEST=true';
 
-function identityParser(value: any): any {
+function identityDecoder(value: any): any {
+  return value;
+}
+
+function identityEncoder(value: any): any {
   return value;
 }
 
@@ -79,7 +83,7 @@ describe('Integration Tests with MinIO', () => {
       },
     };
 
-    client = new ImmuKVClient(config, identityParser);
+    client = new ImmuKVClient(config, identityDecoder, identityEncoder);
   });
 
   afterEach(async () => {
@@ -328,7 +332,7 @@ describe('Integration Tests with MinIO', () => {
         },
         forcePathStyle: true,
       },
-    }, identityParser);
+    }, identityDecoder, identityEncoder);
 
     // First write - creates genesis entry with previousVersionId=undefined, previousKeyObjectEtag=undefined
     const entry1 = await client.set('test-key', { value: 'first' });
@@ -390,7 +394,7 @@ describe('Integration Tests with MinIO', () => {
         },
         forcePathStyle: true,
       },
-    }, identityParser);
+    }, identityDecoder, identityEncoder);
 
     await client.set('test-key', { value: 'test' });
 

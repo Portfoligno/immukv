@@ -72,7 +72,7 @@ def get_optional_int(data: Dict[str, JSONValue], key: str) -> Optional[int]:
 
 
 def entry_from_key_object(
-    data: Dict[str, JSONValue], value_parser: Callable[[JSONValue], V]
+    data: Dict[str, JSONValue], value_decoder: Callable[[JSONValue], V]
 ) -> Entry[K, V]:
     """Construct Entry from key object JSON data.
 
@@ -81,10 +81,10 @@ def entry_from_key_object(
 
     Args:
         data: Parsed JSON dict from S3 key object
-        value_parser: Parser to transform JSONValue to user's V type
+        value_decoder: Decoder to transform JSONValue to user's V type
     """
-    # Parse value using user's parser
-    value = value_parser(data["value"])
+    # Decode value using user's decoder
+    value = value_decoder(data["value"])
 
     return Entry(
         key=cast(K, get_str(data, "key")),
@@ -100,7 +100,7 @@ def entry_from_key_object(
 
 
 def entry_from_log(
-    data: Dict[str, JSONValue], version_id: LogVersionId[K], value_parser: Callable[[JSONValue], V]
+    data: Dict[str, JSONValue], version_id: LogVersionId[K], value_decoder: Callable[[JSONValue], V]
 ) -> Entry[K, V]:
     """Construct Entry from log JSON data with explicit version_id.
 
@@ -110,13 +110,13 @@ def entry_from_log(
     Args:
         data: Parsed JSON dict from S3 log entry
         version_id: S3 version ID of the log entry
-        value_parser: Parser to transform JSONValue to user's V type
+        value_decoder: Decoder to transform JSONValue to user's V type
     """
     prev_version_id_str = get_optional_str(data, "previous_version_id")
     prev_key_etag_str = get_optional_str(data, "previous_key_object_etag")
 
-    # Parse value using user's parser
-    value = value_parser(data["value"])
+    # Decode value using user's decoder
+    value = value_decoder(data["value"])
 
     return Entry(
         key=cast(K, get_str(data, "key")),

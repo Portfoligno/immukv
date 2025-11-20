@@ -20,6 +20,10 @@ JSONValue = Union[
     Dict[str, "JSONValue"],
 ]
 
-# Parser that transforms JSONValue into user's V type
-# This is the main public API - users need this to provide custom parsers
-ValueParser = Callable[[JSONValue], V]
+# Decoder that transforms JSONValue into user's V type
+# Users provide this to parse JSON from S3 into their custom types
+ValueDecoder = Callable[[JSONValue], V]
+
+# Encoder that transforms user's V type into JSONValue
+# Users provide this to serialize their custom types to JSON for S3
+ValueEncoder = Callable[[V], JSONValue]

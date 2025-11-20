@@ -1,7 +1,7 @@
 """ImmuKV - Lightweight immutable key-value store using S3 versioning."""
 
 from immukv.client import ImmuKVClient
-from immukv.json_helpers import JSONValue, ValueParser
+from immukv.json_helpers import JSONValue, ValueDecoder, ValueEncoder
 from immukv.types import (
     Config,
     Entry,
@@ -24,7 +24,8 @@ __all__ = [
     "ImmuKVClient",
     # JSON types
     "JSONValue",
-    "ValueParser",
+    "ValueDecoder",
+    "ValueEncoder",
     # Core types
     "Config",
     "Entry",

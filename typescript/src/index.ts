@@ -3,7 +3,7 @@
  */
 
 export { ImmuKVClient } from './client';
-export type { JSONValue, ValueParser } from './jsonHelpers';
+export type { JSONValue, ValueDecoder, ValueEncoder } from './jsonHelpers';
 export {
   KeyNotFoundError,
   ReadOnlyError,
