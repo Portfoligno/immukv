@@ -242,38 +242,38 @@ describe('Integration Tests with MinIO', () => {
   });
 
   test('log object structure matches spec', async () => {
-    // Create first entry (genesis) then a second entry
-    await client.set('key0', { data: 'first' });
-    const entry = await client.set('key1', { data: 'value' });
+    // Create genesis entry
+    const genesisEntry = await client.set('key0', { data: 'first' });
 
-    // Read log object directly from S3 (latest version has all fields)
-    const response = await s3Client.send(
+    // Read genesis log entry specifically to check omitted fields
+    const genesisResponse = await s3Client.send(
       new GetObjectCommand({
         Bucket: bucketName,
         Key: 'test/_log.json',
+        VersionId: genesisEntry.versionId,
       })
     );
 
-    const logDataStr = await response.Body!.transformToString();
-    const logData = JSON.parse(logDataStr);
+    const genesisDataStr = await genesisResponse.Body!.transformToString();
+    const genesisData = JSON.parse(genesisDataStr);
 
-    // Verify required fields per design doc
+    // Verify always-required fields
     const requiredFields = [
       'sequence',
       'key',
       'value',
       'timestamp_ms',
-      'previous_version_id',
       'previous_hash',
       'hash',
     ];
 
     for (const field of requiredFields) {
-      expect(logData).toHaveProperty(field);
+      expect(genesisData).toHaveProperty(field);
     }
 
-    // previous_key_object_etag field exists but may be null
-    expect('previous_key_object_etag' in logData).toBe(true);
+    // Optional fields should be omitted for genesis entry (undefined stripped)
+    expect(genesisData).not.toHaveProperty('previous_version_id');
+    expect(genesisData).not.toHaveProperty('previous_key_object_etag');
   });
 
   test('key object structure matches spec', async () => {
@@ -311,5 +311,126 @@ describe('Integration Tests with MinIO', () => {
     for (const field of excludedFields) {
       expect(keyData).not.toHaveProperty(field);
     }
+  });
+
+  test('undefined values omitted from JSON', async () => {
+    if (!integrationTestEnabled) return;
+
+    const client = new ImmuKVClient<string, any>({
+      s3Bucket: bucketName,
+      s3Region: 'us-east-1',
+      s3Prefix: 'test-undefined-omit/',
+      overrides: {
+        endpointUrl: process.env.IMMUKV_S3_ENDPOINT,
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'minioadmin',
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin',
+        },
+        forcePathStyle: true,
+      },
+    }, identityParser);
+
+    // First write - creates genesis entry with previousVersionId=undefined, previousKeyObjectEtag=undefined
+    const entry1 = await client.set('test-key', { value: 'first' });
+
+    // Read raw log entry from S3 to verify undefined fields are omitted
+    const getResponse = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: bucketName,
+        Key: 'test-undefined-omit/_log.json',
+        VersionId: entry1.versionId,
+      })
+    );
+
+    const logBody = await getResponse.Body?.transformToString();
+    const logData = JSON.parse(logBody!);
+
+    // Verify undefined values were omitted (fields should not exist in JSON)
+    expect(logData).not.toHaveProperty('previous_version_id');
+    expect(logData).not.toHaveProperty('previous_key_object_etag');
+
+    // Second write - has previousVersionId but previousKeyObjectEtag might be undefined
+    const entry2 = await client.set('test-key', { value: 'second' });
+
+    const getResponse2 = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: bucketName,
+        Key: 'test-undefined-omit/_log.json',
+        VersionId: entry2.versionId,
+      })
+    );
+
+    const logBody2 = await getResponse2.Body?.transformToString();
+    const logData2 = JSON.parse(logBody2!);
+
+    // Second entry should have previous_version_id (not undefined)
+    expect(logData2).toHaveProperty('previous_version_id');
+    expect(logData2.previous_version_id).toBe(entry1.versionId);
+
+    // If previous_key_object_etag is undefined, it should be omitted
+    // If it exists, it should have a value
+    if ('previous_key_object_etag' in logData2) {
+      expect(logData2.previous_key_object_etag).not.toBeUndefined();
+      expect(logData2.previous_key_object_etag).not.toBeNull();
+    }
+  });
+
+  test('missing optional fields handled correctly', async () => {
+    if (!integrationTestEnabled) return;
+
+    const client = new ImmuKVClient<string, any>({
+      s3Bucket: bucketName,
+      s3Region: 'us-east-1',
+      s3Prefix: 'test-missing-fields-ts/',
+      overrides: {
+        endpointUrl: process.env.IMMUKV_S3_ENDPOINT,
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'minioadmin',
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin',
+        },
+        forcePathStyle: true,
+      },
+    }, identityParser);
+
+    await client.set('test-key', { value: 'test' });
+
+    // Manually write a log entry with optional fields completely missing (simulating Python None stripping)
+    const manuallyCreatedLog = {
+      sequence: 99,
+      key: 'manual-key',
+      value: { data: 'manual' },
+      timestamp_ms: 1234567890000,
+      hash: 'sha256:' + 'a'.repeat(64),
+      previous_hash: 'sha256:genesis',
+      // Deliberately omit previous_version_id and previous_key_object_etag
+    };
+
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: bucketName,
+        Key: 'test-missing-fields-ts/_log.json',
+        Body: JSON.stringify(manuallyCreatedLog),
+        ContentType: 'application/json',
+      })
+    );
+
+    // Read it back
+    const getResponse = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: bucketName,
+        Key: 'test-missing-fields-ts/_log.json',
+      })
+    );
+
+    const logBody = await getResponse.Body?.transformToString();
+    const logData = JSON.parse(logBody!);
+
+    // Verify fields are missing (Python None stripping behavior)
+    expect(logData).not.toHaveProperty('previous_version_id');
+    expect(logData).not.toHaveProperty('previous_key_object_etag');
+
+    // TypeScript should handle missing fields as undefined
+    expect(logData.previous_version_id).toBeUndefined();
+    expect(logData.previous_key_object_etag).toBeUndefined();
   });
 });

@@ -3,18 +3,22 @@
  */
 
 import * as s3 from '@aws-sdk/client-s3';
-import {
+import type {
   Config,
   Entry,
   Hash,
-  KeyNotFoundError,
   KeyObjectETag,
   KeyVersionId,
-  LogEntryForHash,
   LogVersionId,
-  OrphanStatus,
-  ReadOnlyError,
   Sequence,
+} from './types';
+import { KeyNotFoundError, ReadOnlyError } from './types';
+import type { JSONValue, ValueParser } from './jsonHelpers';
+import { BrandedS3Client } from './internal/s3Client';
+import { readBodyAsJson } from './internal/s3Helpers';
+import { stringifyCanonical } from './internal/jsonHelpers';
+import type { LogEntryForHash, OrphanStatus } from './internal/types';
+import {
   hashCompute,
   hashFromJson,
   hashGenesis,
@@ -23,10 +27,7 @@ import {
   sequenceNext,
   timestampFromJson,
   timestampNow,
-} from './types';
-import { JSONValue, ValueParser, stringifyCanonical } from './jsonHelpers';
-import { BrandedS3Client } from './internal/s3Client';
-import { readBodyAsJson } from './internal/s3Helpers';
+} from './internal/types';
 import {
   HeadObjectCommandOutputs,
   ObjectVersions,
@@ -127,7 +128,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         previous_version_id: prevVersionId,
         previous_hash: prevHash,
         hash: entryHash,
-        previous_key_object_etag: currentKeyEtag ?? null,
+        previous_key_object_etag: currentKeyEtag ?? undefined,
       };
 
       try {
@@ -278,7 +279,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         hash: hashFromJson(data.hash as string),
         previousHash: hashFromJson(data.previous_hash as string),
         previousKeyObjectEtag:
-          data.previous_key_object_etag !== null
+          data.previous_key_object_etag !== undefined
             ? (data.previous_key_object_etag as KeyObjectETag<K>)
             : undefined,
       };
@@ -299,15 +300,15 @@ export class ImmuKVClient<K extends string = string, V = any> {
    */
   async history(
     key: K,
-    beforeVersionId: KeyVersionId<K> | null,
-    limit: number | null
-  ): Promise<[Entry<K, V>[], KeyVersionId<K> | null]> {
+    beforeVersionId: KeyVersionId<K> | undefined,
+    limit: number | undefined
+  ): Promise<[Entry<K, V>[], KeyVersionId<K> | undefined]> {
     const keyPath = S3KeyPaths.forKey(this.config.s3Prefix, key);
     const entries: Entry<K, V>[] = [];
 
     let prependOrphan = false;
     if (
-      beforeVersionId === null &&
+      beforeVersionId === undefined &&
       this.latestOrphanStatus?.isOrphaned === true &&
       this.latestOrphanStatus.orphanKey === key &&
       this.latestOrphanStatus.orphanEntry !== undefined
@@ -316,7 +317,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
       entries.push(this.latestOrphanStatus.orphanEntry);
     }
 
-    let lastKeyVersionId: KeyVersionId<K> | null = null;
+    let lastKeyVersionId: KeyVersionId<K> | undefined = undefined;
     try {
       let versionIdMarker = beforeVersionId ?? undefined;
       let isTruncated = true;
@@ -332,7 +333,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const versions = response.Versions ?? [];
         for (const version of versions) {
           if (version.Key !== keyPath) continue;
-          if (beforeVersionId !== null && version.VersionId === beforeVersionId) continue;
+          if (beforeVersionId !== undefined && version.VersionId === beforeVersionId) continue;
 
           const keyVersionId = ObjectVersions.keyVersionId<K>(version);
           const objResponse = await this.s3.getObject({
@@ -357,7 +358,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
           entries.push(entry);
           lastKeyVersionId = keyVersionId;
 
-          if (limit !== null && entries.length >= limit) {
+          if (limit !== undefined && entries.length >= limit) {
             return [entries, lastKeyVersionId];
           }
         }
@@ -371,15 +372,15 @@ export class ImmuKVClient<K extends string = string, V = any> {
     } catch (error: any) {
       if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
         if (prependOrphan) {
-          return [entries, null];
+          return [entries, undefined];
         }
-        return [[], null];
+        return [[], undefined];
       }
       throw error;
     }
 
-    const oldestKeyVersionId: KeyVersionId<K> | null =
-      entries.length > 0 && !prependOrphan ? lastKeyVersionId : null;
+    const oldestKeyVersionId: KeyVersionId<K> | undefined =
+      entries.length > 0 && !prependOrphan ? lastKeyVersionId : undefined;
     return [entries, oldestKeyVersionId];
   }
 
@@ -387,8 +388,8 @@ export class ImmuKVClient<K extends string = string, V = any> {
    * Get entries from global log (descending order - newest first).
    */
   async logEntries(
-    beforeVersionId: LogVersionId<K> | null,
-    limit: number | null
+    beforeVersionId: LogVersionId<K> | undefined,
+    limit: number | undefined
   ): Promise<Entry<K, V>[]> {
     const entries: Entry<K, V>[] = [];
 
@@ -407,7 +408,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const versions = response.Versions ?? [];
         for (const version of versions) {
           if (version.Key !== this.logKey) continue;
-          if (beforeVersionId !== null && version.VersionId === beforeVersionId) continue;
+          if (beforeVersionId !== undefined && version.VersionId === beforeVersionId) continue;
 
           const objResponse = await this.s3.getObject({
             Bucket: this.config.s3Bucket,
@@ -426,19 +427,19 @@ export class ImmuKVClient<K extends string = string, V = any> {
             versionId: logVersionId,
             sequence: sequenceFromJson(data.sequence as number),
             previousVersionId:
-              data.previous_version_id !== undefined && data.previous_version_id !== null
+              data.previous_version_id !== undefined
                 ? (data.previous_version_id as LogVersionId<K>)
                 : undefined,
             hash: hashFromJson(data.hash as string),
             previousHash: hashFromJson(data.previous_hash as string),
             previousKeyObjectEtag:
-              data.previous_key_object_etag !== undefined && data.previous_key_object_etag !== null
+              data.previous_key_object_etag !== undefined
                 ? (data.previous_key_object_etag as KeyObjectETag<K>)
                 : undefined,
           };
           entries.push(entry);
 
-          if (limit !== null && entries.length >= limit) {
+          if (limit !== undefined && entries.length >= limit) {
             return entries;
           }
         }
@@ -462,7 +463,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
   /**
    * List all keys in the system (lexicographic order).
    */
-  async listKeys(afterKey: K | null, limit: number | null): Promise<K[]> {
+  async listKeys(afterKey: K | undefined, limit: number | undefined): Promise<K[]> {
     const keys: K[] = [];
     const prefix = `${this.config.s3Prefix}keys/`;
 
@@ -474,7 +475,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         const response = await this.s3.listObjectsV2({
           Bucket: this.config.s3Bucket,
           Prefix: prefix,
-          StartAfter: afterKey !== null ? `${prefix}${afterKey}.json` : prefix,
+          StartAfter: afterKey !== undefined ? `${prefix}${afterKey}.json` : prefix,
           ContinuationToken: continuationToken,
         });
 
@@ -485,7 +486,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
             const cleanKey = keyName.substring(0, keyName.length - 5) as K;
             keys.push(cleanKey);
 
-            if (limit !== null && keys.length >= limit) {
+            if (limit !== undefined && keys.length >= limit) {
               return keys;
             }
           }
@@ -520,7 +521,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
    * Verify hash chain in log.
    */
   async verifyLogChain(limit?: number): Promise<boolean> {
-    const entries = await this.logEntries(null, limit ?? null);
+    const entries = await this.logEntries(undefined, limit ?? undefined);
 
     if (entries.length === 0) {
       return true;
@@ -590,7 +591,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         hash: hashFromJson(data.hash as string),
         previousHash: hashFromJson(data.previous_hash as string),
         previousKeyObjectEtag:
-          data.previous_key_object_etag !== null
+          data.previous_key_object_etag !== undefined
             ? (data.previous_key_object_etag as KeyObjectETag<K>)
             : undefined,
       };

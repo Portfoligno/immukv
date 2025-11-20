@@ -6,19 +6,15 @@ type checking, and other functionality that doesn't need S3.
 
 import pytest
 
-from immukv.types import (
-    Config,
-    Hash,
+from immukv._internal.types import (
     LogEntryForHash,
-    S3Overrides,
-    Sequence,
-    TimestampMs,
     hash_compute,
-    hash_genesis,
     hash_from_json,
+    hash_genesis,
     sequence_from_json,
     timestamp_from_json,
 )
+from immukv.types import Config, Hash, S3Overrides, Sequence, TimestampMs
 
 
 # --- Hash Computation Tests ---

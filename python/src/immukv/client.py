@@ -10,15 +10,30 @@ from botocore.exceptions import ClientError
 if TYPE_CHECKING:
     from mypy_boto3_s3.client import S3Client
 
-from immukv.json_helpers import (
-    JSONValue,
-    ValueParser,
+from immukv._internal.json_helpers import (
     dumps_canonical,
     entry_from_key_object,
     entry_from_log,
     get_int,
     get_str,
+    strip_none_values,
 )
+from immukv._internal.types import (
+    JSONValue,
+    KeyObjectDict,
+    LatestLogState,
+    LogEntryDict,
+    LogEntryForHash,
+    OrphanStatus,
+    hash_compute,
+    hash_from_json,
+    hash_genesis,
+    sequence_from_json,
+    sequence_initial,
+    sequence_next,
+    timestamp_now,
+)
+from immukv.json_helpers import ValueParser
 from immukv._internal.s3_client import BrandedS3Client
 from immukv._internal.s3_helpers import get_error_code, read_body_as_json
 from immukv._internal.s3_types import (
@@ -36,20 +51,10 @@ from immukv.types import (
     KeyNotFoundError,
     KeyObjectETag,
     KeyVersionId,
-    LatestLogState,
-    LogEntryForHash,
     LogVersionId,
-    OrphanStatus,
     ReadOnlyError,
     Sequence,
     TimestampMs,
-    hash_compute,
-    hash_from_json,
-    hash_genesis,
-    sequence_from_json,
-    sequence_initial,
-    sequence_next,
-    timestamp_now,
 )
 
 logger = logging.getLogger(__name__)
@@ -177,10 +182,10 @@ class ImmuKVClient(Generic[K, V]):
             entry_hash = self._calculate_hash(entry_for_hash)
 
             # Step 4: Create complete log entry (with current key object ETag)
-            log_entry = {
+            log_entry: LogEntryDict = {
                 "sequence": new_sequence,
                 "key": key,
-                "value": value,
+                "value": cast(JSONValue, value),
                 "timestamp_ms": timestamp_ms,
                 "previous_version_id": prev_version_id,
                 "previous_hash": prev_hash,
@@ -190,12 +195,15 @@ class ImmuKVClient(Generic[K, V]):
 
             # Step 5: Write to log with optimistic locking
             try:
+                # Strip None values to match TypeScript's undefined behavior (omits field from JSON)
+                log_entry_for_json = strip_none_values(cast(Dict[str, JSONValue], log_entry))
+
                 if log_etag is not None:
                     # Update existing log - use IfMatch
                     response = self.s3.put_object(
                         bucket=self.config.s3_bucket,
                         key=self.log_key,
-                        body=dumps_canonical(cast(JSONValue, log_entry)),
+                        body=dumps_canonical(cast(JSONValue, log_entry_for_json)),
                         content_type="application/json",
                         if_match=log_etag,
                     )
@@ -204,7 +212,7 @@ class ImmuKVClient(Generic[K, V]):
                     response = self.s3.put_object(
                         bucket=self.config.s3_bucket,
                         key=self.log_key,
-                        body=dumps_canonical(cast(JSONValue, log_entry)),
+                        body=dumps_canonical(cast(JSONValue, log_entry_for_json)),
                         content_type="application/json",
                         if_none_match="*",
                     )
@@ -234,10 +242,10 @@ class ImmuKVClient(Generic[K, V]):
         key_object_etag: Optional[KeyObjectETag[K]] = None
         try:
             # Create key object data - INCLUDES ALL FIELDS FROM LOG ENTRY
-            key_data = {
+            key_data: KeyObjectDict = {
                 "sequence": new_sequence,
                 "key": key,
-                "value": value,
+                "value": cast(JSONValue, value),
                 "timestamp_ms": timestamp_ms,
                 "log_version_id": new_log_version_id,
                 "hash": entry_hash,
@@ -719,10 +727,10 @@ class ImmuKVClient(Generic[K, V]):
         key_path = S3KeyPaths.for_key(self.config.s3_prefix, latest_log.key)
 
         # Prepare repair data
-        repair_data = {
+        repair_data: KeyObjectDict = {
             "sequence": latest_log.sequence,
             "key": latest_log.key,
-            "value": latest_log.value,
+            "value": cast(JSONValue, latest_log.value),
             "timestamp_ms": latest_log.timestamp_ms,
             "log_version_id": latest_log.version_id,
             "hash": latest_log.hash,

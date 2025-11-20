@@ -3,7 +3,18 @@
  */
 
 export { ImmuKVClient } from './client';
-export { JSONValue, ValueParser } from './jsonHelpers';
-export { Config, Entry, KeyNotFoundError, ReadOnlyError } from './types';
+export type { JSONValue, ValueParser } from './jsonHelpers';
+export {
+  KeyNotFoundError,
+  ReadOnlyError,
+  type Config,
+  type Entry,
+  type Hash,
+  type KeyObjectETag,
+  type KeyVersionId,
+  type LogVersionId,
+  type Sequence,
+  type TimestampMs,
+} from './types';
 
 export const VERSION = '__VERSION_EeEyfbyVyf4JmFfk__';

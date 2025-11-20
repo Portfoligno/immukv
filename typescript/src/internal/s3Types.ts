@@ -6,8 +6,9 @@
 
 import * as s3 from '@aws-sdk/client-s3';
 import type { StreamingBlobPayloadOutputTypes } from '@smithy/types';
-import { LogVersionId, KeyVersionId, KeyObjectETag, brandWithKey } from '../types';
+import type { KeyObjectETag, KeyVersionId, LogVersionId } from '../types';
 import { assertAwsFieldPresent } from './s3Helpers';
+import { brandWithKey } from './types';
 
 /**
  * Branded type for log keys (constant key type for log file paths).

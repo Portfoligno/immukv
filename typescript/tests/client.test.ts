@@ -184,7 +184,7 @@ describe('ImmuKVClient', () => {
       await client.set('metric', { count: 2 });
       await client.set('metric', { count: 3 });
 
-      const [entries, oldestVersion] = await client.history('metric', null, null);
+      const [entries, oldestVersion] = await client.history('metric', undefined, undefined);
 
       expect(entries).toHaveLength(3);
       expect(entries[0].value).toEqual({ count: 3 });
@@ -201,7 +201,7 @@ describe('ImmuKVClient', () => {
         await client.set('counter', { value: i });
       }
 
-      const [entries] = await client.history('counter', null, 3);
+      const [entries] = await client.history('counter', undefined, 3);
 
       expect(entries).toHaveLength(3);
       expect(entries[0].value).toEqual({ value: 4 });
@@ -216,7 +216,7 @@ describe('ImmuKVClient', () => {
       await client.set('key-y', { data: 'y2' });
       await client.set('key-x', { data: 'x3' });
 
-      const [entries] = await client.history('key-x', null, null);
+      const [entries] = await client.history('key-x', undefined, undefined);
 
       expect(entries).toHaveLength(3);
       expect(entries.every(e => e.key === 'key-x')).toBe(true);
@@ -228,10 +228,14 @@ describe('ImmuKVClient', () => {
     test('history for nonexistent key returns empty array', async () => {
       await client.set('other-key', { data: 'value' });
 
-      const [entries, oldestVersion] = await client.history('nonexistent-key', null, null);
+      const [entries, oldestVersion] = await client.history(
+        'nonexistent-key',
+        undefined,
+        undefined
+      );
 
       expect(entries).toEqual([]);
-      expect(oldestVersion).toBeNull();
+      expect(oldestVersion).toBeUndefined();
     });
   });
 
@@ -241,7 +245,7 @@ describe('ImmuKVClient', () => {
       await client.set('k2', { v: 2 });
       await client.set('k1', { v: 3 });
 
-      const entries = await client.logEntries(null, null);
+      const entries = await client.logEntries(undefined, undefined);
 
       expect(entries).toHaveLength(3);
       expect(entries[0].key).toBe('k1');
@@ -262,7 +266,7 @@ describe('ImmuKVClient', () => {
         await client.set(`key-${i}`, { index: i });
       }
 
-      const entries = await client.logEntries(null, 3);
+      const entries = await client.logEntries(undefined, 3);
 
       expect(entries).toHaveLength(3);
       expect(entries[0].sequence).toBe(4);
@@ -277,7 +281,7 @@ describe('ImmuKVClient', () => {
       await client.set('apple', { fruit: 'a' });
       await client.set('banana', { fruit: 'b' });
 
-      const keys = await client.listKeys(null, null);
+      const keys = await client.listKeys(undefined, undefined);
 
       expect(keys).toHaveLength(3);
       expect(keys).toEqual(['apple', 'banana', 'zebra']);
@@ -288,7 +292,7 @@ describe('ImmuKVClient', () => {
         await client.set(`key-${i.toString().padStart(2, '0')}`, { index: i });
       }
 
-      const keys = await client.listKeys(null, 3);
+      const keys = await client.listKeys(undefined, 3);
 
       expect(keys).toHaveLength(3);
       expect(keys).toEqual(['key-00', 'key-01', 'key-02']);
@@ -494,7 +498,7 @@ describe('ImmuKVClient', () => {
       };
 
       // Get history - should NOT include orphan entry as first item
-      const [entries] = await client.history('test-key', null, null);
+      const [entries] = await client.history('test-key', undefined, undefined);
 
       // Should have 2 entries (v2 and v1), NOT 3 (orphan + v2 + v1)
       expect(entries).toHaveLength(2);
@@ -516,7 +520,7 @@ describe('ImmuKVClient', () => {
       };
 
       // Get history - should include orphan entry as first item
-      const [entries] = await client.history('test-key', null, null);
+      const [entries] = await client.history('test-key', undefined, undefined);
 
       // Should have 3 entries: orphan (v2) + v2 + v1
       // Note: This creates a duplicate entry, which is the expected behavior

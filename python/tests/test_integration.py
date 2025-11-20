@@ -256,20 +256,25 @@ def test_log_object_structure_matches_spec(
 
     log_data = read_body_as_json(response["Body"])
 
-    # Verify required fields per design doc
+    # Verify always-required fields
     required_fields = [
         "sequence",
         "key",
         "value",
         "timestamp_ms",
-        "previous_version_id",
         "previous_hash",
         "hash",
-        "previous_key_object_etag",
     ]
 
     for field in required_fields:
         assert field in log_data, f"Log object missing required field: {field}"
+
+    # Optional fields should be omitted for genesis entry (None/undefined stripped)
+    # previous_version_id and previous_key_object_etag are NotRequired[Optional[str]]
+    assert "previous_version_id" not in log_data, "Genesis entry should omit previous_version_id"
+    assert (
+        "previous_key_object_etag" not in log_data
+    ), "Genesis entry should omit previous_key_object_etag"
 
 
 def test_key_object_structure_matches_spec(
@@ -303,3 +308,119 @@ def test_key_object_structure_matches_spec(
 
     for field in excluded_fields:
         assert field not in key_data, f"Key object should not contain infrastructure field: {field}"
+
+
+def test_none_values_omitted_from_json(s3_bucket: str, s3_client: BrandedS3Client) -> None:
+    """Test that None values are stripped from JSON to match TypeScript undefined behavior."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    client = ImmuKVClient[str, dict[str, object]](
+        config=Config(
+            s3_bucket=s3_bucket,
+            s3_region="us-east-1",
+            s3_prefix="test-none-strip/",
+            overrides=S3Overrides(
+                endpoint_url=endpoint_url,
+                credentials=S3Credentials(
+                    aws_access_key_id=access_key, aws_secret_access_key=secret_key
+                ),
+                force_path_style=True,
+            ),
+        ),
+        value_parser=lambda v: cast(dict[str, object], v),
+    )
+
+    # First write - creates genesis entry with previous_version_id=None, previous_key_object_etag=None
+    entry1 = client.set("test-key", {"value": "first"})
+
+    # Read raw log entry from S3 to verify None fields are omitted
+    log_response = s3_client.get_object(
+        bucket=s3_bucket,
+        key=S3KeyPath(f"test-none-strip/_log.json"),
+        version_id=entry1.version_id,
+    )
+    log_data = read_body_as_json(log_response["Body"])
+
+    # Verify None values were stripped (fields should not exist in JSON)
+    assert "previous_version_id" not in log_data, "None value should be omitted from JSON"
+    assert (
+        "previous_key_object_etag" not in log_data
+    ), "None value should be omitted from JSON"
+
+    # Second write - has previous_version_id but previous_key_object_etag might be None
+    entry2 = client.set("test-key", {"value": "second"})
+
+    log_response2 = s3_client.get_object(
+        bucket=s3_bucket,
+        key=S3KeyPath(f"test-none-strip/_log.json"),
+        version_id=entry2.version_id,
+    )
+    log_data2 = read_body_as_json(log_response2["Body"])
+
+    # Second entry should have previous_version_id (not None)
+    assert "previous_version_id" in log_data2, "Non-None value should be present in JSON"
+    assert log_data2["previous_version_id"] == entry1.version_id
+
+    # If previous_key_object_etag is None, it should be omitted
+    # If it exists, it should have a value
+    if "previous_key_object_etag" in log_data2:
+        assert log_data2["previous_key_object_etag"] is not None
+
+
+def test_missing_optional_fields_handled_correctly(s3_bucket: str, s3_client: BrandedS3Client) -> None:
+    """Test that missing optional fields (from TypeScript undefined) are handled as None."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    client = ImmuKVClient[str, dict[str, object]](
+        config=Config(
+            s3_bucket=s3_bucket,
+            s3_region="us-east-1",
+            s3_prefix="test-missing-fields/",
+            overrides=S3Overrides(
+                endpoint_url=endpoint_url,
+                credentials=S3Credentials(
+                    aws_access_key_id=access_key, aws_secret_access_key=secret_key
+                ),
+                force_path_style=True,
+            ),
+        ),
+        value_parser=lambda v: cast(dict[str, object], v),
+    )
+
+    entry = client.set("test-key", {"value": "test"})
+
+    # Manually write a log entry with optional fields completely missing (simulating TypeScript)
+    manually_created_log = {
+        "sequence": 99,
+        "key": "manual-key",
+        "value": {"data": "manual"},
+        "timestamp_ms": 1234567890000,
+        "hash": "sha256:" + "a" * 64,
+        "previous_hash": "sha256:genesis",
+        # Deliberately omit previous_version_id and previous_key_object_etag
+    }
+
+    s3_client.put_object(
+        bucket=s3_bucket,
+        key=S3KeyPath(f"test-missing-fields/_log.json"),
+        body=json.dumps(manually_created_log).encode("utf-8"),
+        content_type="application/json",
+    )
+
+    # Read it back - should handle missing fields as None
+    log_response = s3_client.get_object(
+        bucket=s3_bucket, key=S3KeyPath(f"test-missing-fields/_log.json"), version_id=None
+    )
+    log_data = read_body_as_json(log_response["Body"])
+
+    # Verify fields are missing (TypeScript undefined behavior)
+    assert "previous_version_id" not in log_data
+    assert "previous_key_object_etag" not in log_data
+
+    # Python should handle missing fields gracefully via get() returning None
+    assert log_data.get("previous_version_id") is None
+    assert log_data.get("previous_key_object_etag") is None

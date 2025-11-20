@@ -5,18 +5,15 @@
  * type checking, and other functionality that doesn't need S3.
  */
 
+import type { LogEntryForHash } from '../src/internal/types';
 import {
-  Config,
-  Hash,
-  LogEntryForHash,
-  TimestampMs,
-  Sequence,
   hashCompute,
-  hashGenesis,
   hashFromJson,
-  timestampFromJson,
+  hashGenesis,
   sequenceFromJson,
-} from '../src/types';
+  timestampFromJson,
+} from '../src/internal/types';
+import type { Config, Hash, Sequence, TimestampMs } from '../src/types';
 
 // --- Hash Computation Tests ---
 

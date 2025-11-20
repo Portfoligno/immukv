@@ -2,7 +2,8 @@
  * Tests for JSON helper functions.
  */
 
-import { JSONValue, stringifyCanonical } from '../src/jsonHelpers';
+import type { JSONValue } from '../src/jsonHelpers';
+import { stringifyCanonical } from '../src/internal/jsonHelpers';
 
 describe('stringifyCanonical', () => {
   test('basic serialization with sorted keys', () => {

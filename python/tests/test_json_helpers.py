@@ -1,7 +1,9 @@
 """Tests for JSON helper functions."""
 
 import pytest
-from immukv.json_helpers import JSONValue, dumps_canonical
+
+from immukv._internal.json_helpers import dumps_canonical
+from immukv.json_helpers import JSONValue
 
 
 def test_dumps_canonical_basic() -> None:
