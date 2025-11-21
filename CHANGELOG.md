@@ -5,6 +5,16 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.18] - 2025-11-21
+
+### Added
+
+- New `withCodec()` / `with_codec()` method to create client with different codec
+  - Creates a new client instance sharing the underlying S3 connection
+  - Allows working with different key/value types while reusing the connection pool
+  - Derived client has independent mutable state (repair check, write permission, orphan status)
+  - Note: Closing either client affects both due to shared S3 connection
+
 ## [0.1.17] - 2025-11-21
 
 ### Changed
@@ -235,6 +245,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.18]: https://github.com/Portfoligno/immukv/releases/tag/0.1.18
 [0.1.17]: https://github.com/Portfoligno/immukv/releases/tag/0.1.17
 [0.1.16]: https://github.com/Portfoligno/immukv/releases/tag/0.1.16
 [0.1.15]: https://github.com/Portfoligno/immukv/releases/tag/0.1.15
