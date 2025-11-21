@@ -549,4 +549,57 @@ describe('ImmuKVClient', () => {
       );
     });
   });
+
+  describe('withCodec', () => {
+    test('creates new client with different codec sharing S3 connection', async () => {
+      // Write with original client
+      await client.set('shared-key', { original: true });
+
+      // Create derived client with different codec
+      type CustomValue = { transformed: boolean };
+      const customDecoder: ValueDecoder<CustomValue> = (json: JSONValue) => ({
+        transformed: (json as any).original === true,
+      });
+      const customEncoder: ValueEncoder<CustomValue> = (value: CustomValue) =>
+        ({ original: value.transformed }) as JSONValue;
+
+      const derivedClient = client.withCodec<string, CustomValue>(customDecoder, customEncoder);
+
+      // Read with derived client - should decode with custom decoder
+      const entry = await derivedClient.get('shared-key');
+      expect(entry.value).toEqual({ transformed: true });
+
+      // Write with derived client
+      await derivedClient.set('custom-key', { transformed: false });
+
+      // Read back with original client - should see the encoded value
+      const originalEntry = await client.get('custom-key');
+      expect(originalEntry.value).toEqual({ original: false });
+    });
+
+    test('derived client shares S3 connection with original', async () => {
+      const derivedClient = client.withCodec(identityDecoder, identityEncoder);
+
+      // Both should reference the same S3 client instance
+      expect((derivedClient as any).s3).toBe((client as any).s3);
+      expect((derivedClient as any).config).toBe((client as any).config);
+    });
+
+    test('derived client has independent mutable state', async () => {
+      const derivedClient = client.withCodec(identityDecoder, identityEncoder);
+
+      // Mutable state should be independent
+      expect((derivedClient as any).lastRepairCheckMs).toBe(0);
+      expect((derivedClient as any).canWrite).toBeUndefined();
+      expect((derivedClient as any).latestOrphanStatus).toBeUndefined();
+
+      // Modify original client's state
+      (client as any).lastRepairCheckMs = 12345;
+      (client as any).canWrite = true;
+
+      // Derived client should be unaffected
+      expect((derivedClient as any).lastRepairCheckMs).toBe(0);
+      expect((derivedClient as any).canWrite).toBeUndefined();
+    });
+  });
 });

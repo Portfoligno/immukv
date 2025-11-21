@@ -554,6 +554,33 @@ export class ImmuKVClient<K extends string = string, V = any> {
   }
 
   /**
+   * Create a new client with different decoder/encoder, sharing the S3 connection.
+   *
+   * This allows working with different key/value types while reusing the connection pool.
+   *
+   * Note: The returned client shares the underlying S3 client. Calling close() on either
+   * client will close the shared connection, affecting both clients.
+   */
+  withCodec<K2 extends string, V2>(
+    valueDecoder: ValueDecoder<V2>,
+    valueEncoder: ValueEncoder<V2>
+  ): ImmuKVClient<K2, V2> {
+    const newClient = Object.create(ImmuKVClient.prototype) as ImmuKVClient<K2, V2>;
+    // Share immutable fields
+    (newClient as any).config = this.config;
+    (newClient as any).s3 = this.s3;
+    (newClient as any).logKey = this.logKey;
+    // Set new codec
+    (newClient as any).valueDecoder = valueDecoder;
+    (newClient as any).valueEncoder = valueEncoder;
+    // Initialize mutable state
+    (newClient as any).lastRepairCheckMs = 0;
+    (newClient as any).canWrite = undefined;
+    (newClient as any).latestOrphanStatus = undefined;
+    return newClient;
+  }
+
+  /**
    * Close client and cleanup resources.
    */
   async close(): Promise<void> {

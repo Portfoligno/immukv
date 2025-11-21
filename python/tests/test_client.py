@@ -115,7 +115,9 @@ def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
         ),
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
     with client_instance as client:
         yield client
 
@@ -456,7 +458,9 @@ def test_custom_endpoint_url_config(s3_bucket: str) -> None:
     )
 
     # Client creation should succeed
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
 
     # Verify overrides are stored in config
     assert client_instance._config.overrides is not None
@@ -475,7 +479,9 @@ def test_default_overrides_is_none(s3_bucket: str) -> None:
         s3_prefix="test/",
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
 
     # Should default to None (uses AWS S3)
     assert client_instance._config.overrides is None
@@ -581,3 +587,69 @@ def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object
     assert entries[0].value == {"value": "v2"}  # Orphan entry
     assert entries[1].value == {"value": "v2"}  # Actual latest
     assert entries[2].value == {"value": "v1"}
+
+
+def test_with_codec_creates_client_with_different_codec(
+    client: ImmuKVClient[str, object],
+) -> None:
+    """Test that with_codec creates a new client with different codec sharing S3 connection."""
+    from typing import TypedDict, cast
+
+    # Write with original client
+    client.set("shared-key", {"original": True})
+
+    # Create derived client with different codec
+    class CustomValue(TypedDict):
+        transformed: bool
+
+    def custom_decoder(json: JSONValue) -> CustomValue:
+        return {"transformed": cast(dict[str, object], json).get("original") is True}
+
+    def custom_encoder(value: CustomValue) -> JSONValue:
+        return {"original": value["transformed"]}
+
+    derived_client: ImmuKVClient[str, CustomValue] = client.with_codec(
+        custom_decoder, custom_encoder
+    )
+
+    # Read with derived client - should decode with custom decoder
+    entry = derived_client.get("shared-key")
+    assert entry.value == {"transformed": True}
+
+    # Write with derived client
+    derived_client.set("custom-key", {"transformed": False})
+
+    # Read back with original client - should see the encoded value
+    original_entry = client.get("custom-key")
+    assert original_entry.value == {"original": False}
+
+
+def test_with_codec_shares_s3_connection(client: ImmuKVClient[str, object]) -> None:
+    """Test that derived client shares S3 connection with original."""
+    derived_client: ImmuKVClient[str, object] = client.with_codec(
+        identity_decoder, identity_encoder
+    )
+
+    # Both should reference the same S3 client instance
+    assert derived_client._s3 is client._s3
+    assert derived_client._config is client._config
+
+
+def test_with_codec_has_independent_mutable_state(client: ImmuKVClient[str, object]) -> None:
+    """Test that derived client has independent mutable state."""
+    derived_client: ImmuKVClient[str, object] = client.with_codec(
+        identity_decoder, identity_encoder
+    )
+
+    # Mutable state should be independent
+    assert derived_client._last_repair_check_ms == 0
+    assert derived_client._can_write is None
+    assert derived_client._latest_orphan_status is None
+
+    # Modify original client's state
+    client._last_repair_check_ms = 12345
+    client._can_write = True
+
+    # Derived client should be unaffected
+    assert derived_client._last_repair_check_ms == 0
+    assert derived_client._can_write is None

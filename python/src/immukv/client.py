@@ -61,7 +61,9 @@ logger = logging.getLogger(__name__)
 
 # Type variables for generic key and value types
 K = TypeVar("K", bound=str)
+K2 = TypeVar("K2", bound=str)
 V = TypeVar("V")
+V2 = TypeVar("V2")
 
 
 class ImmuKVClient(Generic[K, V]):
@@ -606,6 +608,30 @@ class ImmuKVClient(Generic[K, V]):
                 return False
 
         return True
+
+    def with_codec(
+        self, value_decoder: ValueDecoder[V2], value_encoder: ValueEncoder[V2]
+    ) -> "ImmuKVClient[K2, V2]":
+        """Create a new client with different decoder/encoder, sharing the S3 connection.
+
+        This allows working with different key/value types while reusing the connection pool.
+
+        Note: The returned client shares the underlying S3 client. Closing either client
+        (via close() or context manager) will close the shared connection, affecting both.
+        """
+        new_client: ImmuKVClient[K2, V2] = object.__new__(ImmuKVClient)  # type: ignore[type-var]
+        # Share immutable fields
+        new_client._config = self._config
+        new_client._s3 = self._s3
+        new_client._log_key = self._log_key
+        # Set new codec
+        new_client._value_decoder = value_decoder  # type: ignore[assignment]
+        new_client._value_encoder = value_encoder  # type: ignore[assignment]
+        # Initialize mutable state
+        new_client._last_repair_check_ms = 0
+        new_client._can_write = None
+        new_client._latest_orphan_status = None
+        return new_client  # type: ignore[return-value]
 
     def close(self) -> None:
         """Close client and cleanup resources."""
