@@ -27,7 +27,7 @@ jobs:
           pip install --no-cache-dir tomli
           PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
           sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/immukv/__init__.py
-          echo "Substituted version: $PACKAGE_VERSION"
+          echo Substituted version: "$PACKAGE_VERSION"
           # Verify substitution succeeded (fails if exact line doesn't match)
           grep -Fx "__version__ = \"$PACKAGE_VERSION\"" src/immukv/__init__.py
 
@@ -101,7 +101,7 @@ jobs:
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
           sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/index.ts
-          echo "Substituted version: $PACKAGE_VERSION"
+          echo Substituted version: "$PACKAGE_VERSION"
           # Verify substitution succeeded (fails if exact line doesn't match)
           grep -Fx "export const VERSION = '$PACKAGE_VERSION';" src/index.ts
 
@@ -187,7 +187,7 @@ jobs:
           pip install --no-cache-dir tomli
           PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
           sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/immukv/__init__.py
-          echo "Substituted version: $PACKAGE_VERSION"
+          echo Substituted version: "$PACKAGE_VERSION"
           grep -Fx "__version__ = \"$PACKAGE_VERSION\"" src/immukv/__init__.py
 
       - name: Install Python dependencies
@@ -198,10 +198,10 @@ jobs:
       - name: Wait for MinIO to be ready
         run: |
           until curl -sf http://minio:9000/minio/health/live; do
-            echo "Waiting for MinIO..."
+            echo Waiting for MinIO...
             sleep 2
           done
-          echo "MinIO is ready!"
+          echo 'MinIO is ready!'
 
       - name: Run integration tests against MinIO
         working-directory: python
@@ -244,7 +244,7 @@ jobs:
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
           sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/index.ts
-          echo "Substituted version: $PACKAGE_VERSION"
+          echo Substituted version: "$PACKAGE_VERSION"
           grep -Fx "export const VERSION = '$PACKAGE_VERSION';" src/index.ts
 
       - name: Install TypeScript dependencies
@@ -255,10 +255,10 @@ jobs:
       - name: Wait for MinIO to be ready
         run: |
           until curl -sf http://minio:9000/minio/health/live; do
-            echo "Waiting for MinIO..."
+            echo Waiting for MinIO...
             sleep 2
           done
-          echo "MinIO is ready!"
+          echo 'MinIO is ready!'
 
       - name: Run integration tests against MinIO
         working-directory: typescript
@@ -342,7 +342,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: All builds and integration tests passed
-        run: echo "All build jobs and integration tests completed successfully"
+        run: echo All build jobs and integration tests completed successfully
 
   publish-python:
     needs: ready-to-publish
