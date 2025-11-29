@@ -20,10 +20,18 @@ jobs:
         with:
           ref: ${{ github.event_name == 'schedule' && 'main' || github.ref }}
 
+      - name: Load environment
+        run: |
+          printf %s "${{ secrets.CLAUDE_ENV }}" | while IFS== read -r key value; do
+            echo ::add-mask::"$key"
+            echo ::add-mask::"$value"
+            echo "$key=$value" >>$GITHUB_ENV
+          done
+
       - name: Run Claude Code to check for implicit boolean expressions
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
           claude_args: --allowedTools 'Bash(gh issue create:*),Bash(gh issue list:*)'
           prompt: |
             Enforce strict boolean expressions for Python Optional types, equivalent to TypeScript's `@typescript-eslint/strict-boolean-expressions` rule.
