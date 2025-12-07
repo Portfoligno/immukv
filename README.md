@@ -299,18 +299,26 @@ ImmuKV is cost-effective for audit log patterns with occasional reads.
 
 ```
 immukv/
+├── cdk/                 # CDK construct package
+│   ├── src/
+│   │   ├── index.ts
+│   │   └── immukv.ts   # CDK construct implementation
+│   ├── test/
+│   └── package.json
 ├── python/              # Python package
 │   ├── src/immukv/
 │   │   ├── __init__.py
-│   │   ├── client.py   # Main client implementation
-│   │   └── types.py    # Type definitions
+│   │   ├── client.py       # Main client implementation
+│   │   ├── json_helpers.py # JSON serialization helpers
+│   │   └── types.py        # Type definitions
 │   ├── tests/
 │   └── pyproject.toml
 ├── typescript/          # TypeScript package
 │   ├── src/
 │   │   ├── index.ts
-│   │   ├── client.ts   # Main client implementation
-│   │   └── types.ts    # Type definitions
+│   │   ├── client.ts       # Main client implementation
+│   │   ├── jsonHelpers.ts  # JSON serialization helpers
+│   │   └── types.ts        # Type definitions
 │   ├── tests/
 │   └── package.json
 └── README.md
