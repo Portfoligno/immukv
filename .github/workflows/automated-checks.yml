@@ -1,0 +1,64 @@
+name: Automated Checks
+
+on:
+  schedule:
+    # Run every 8 hours starting at 04:39 UTC
+    - cron: '39 4,12,20 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  prepare-checks:
+    name: Prepare Automated Checks
+    runs-on: ubuntu-latest
+    outputs:
+      checks: ${{ steps.find-checks.outputs.checks }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'main' || github.ref }}
+
+      - name: Find automated check prompts
+        id: find-checks
+        run: |
+          checks=$(find .github/automated-checks -type f -name '*.md' | jq -Rsc 'split("\n")[:-1] | map({path: ., name: split("[./]"; "")[3]})')
+          echo checks="$checks" >>$GITHUB_OUTPUT
+          echo Found checks: "$checks"
+
+  run-checks:
+    name: ${{ matrix.check.name }}
+    needs: prepare-checks
+    if: ${{ needs.prepare-checks.outputs.checks != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        check: ${{ fromJson(needs.prepare-checks.outputs.checks) }}
+      fail-fast: false
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'main' || github.ref }}
+
+      - name: Load check prompt
+        run: printf 'CHECK_PROMPT<<EOF\n%s\nEOF\n' "$(cat "${{ matrix.check.path }}")" >>$GITHUB_ENV
+
+      - name: Load environment
+        run: |
+          printf %s "${{ secrets.CLAUDE_ENV }}" | while IFS== read -r key value; do
+            echo ::add-mask::"$key"
+            echo ::add-mask::"$value"
+            echo "$key=$value" >>$GITHUB_ENV
+          done
+
+      - name: Run automated check
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ env.ANTHROPIC_API_KEY }}
+          claude_args: --allowedTools 'Bash(gh issue create:*),Bash(gh issue list:*)'
+          prompt: ${{ env.CHECK_PROMPT }}
