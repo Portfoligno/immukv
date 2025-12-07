@@ -150,7 +150,10 @@ ImmuKV(stack, "ImmuKV",
 
 ## API
 
-See the [API documentation](https://github.com/Portfoligno/immukv/tree/main/cdk) for detailed information.
+The `ImmuKV` construct accepts the following properties:
+- `bucketName` (required): Name for the S3 bucket
+- `s3Prefix` (optional): Prefix for S3 keys
+- `onLogEntryCreated` (optional): S3 notification destination for log entry events
 
 ## License
 

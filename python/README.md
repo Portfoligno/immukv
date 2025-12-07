@@ -37,4 +37,4 @@ with ImmuKVClient(config) as client:
 - **No database** - Uses S3 versioning only
 - **Auto-repair** - Orphaned entries repaired automatically
 
-See the [full documentation](../../README.md) for more details.
+See the [full documentation](../README.md) for more details.
