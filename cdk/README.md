@@ -151,9 +151,14 @@ ImmuKV(stack, "ImmuKV",
 ## API
 
 The `ImmuKV` construct accepts the following properties:
-- `bucketName` (required): Name for the S3 bucket
+- `bucketName` (optional): Name for the S3 bucket. If not specified, an auto-generated bucket name will be used.
 - `s3Prefix` (optional): Prefix for S3 keys
 - `onLogEntryCreated` (optional): S3 notification destination for log entry events
+- `logVersionRetention` (optional): Duration to retain old log versions
+- `logVersionsToRetain` (optional): Number of old log versions to retain
+- `keyVersionRetention` (optional): Duration to retain old key object versions
+- `keyVersionsToRetain` (optional): Number of old key versions to retain per key
+- `useKmsEncryption` (optional): Enable KMS encryption instead of S3-managed encryption (default: false)
 
 ## License
 
