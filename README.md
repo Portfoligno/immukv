@@ -61,7 +61,10 @@ config = Config(
     s3_prefix=""
 )
 
-with ImmuKVClient(config) as client:
+# Identity functions for JSON values (use custom encoders/decoders for complex types)
+def identity(x): return x
+
+with ImmuKVClient(config, identity, identity) as client:
     # Write
     entry = client.set("sensor-012352", {"alpha": 0.15, "beta": 2.8})
     print(f"Committed: {entry.version_id}")
@@ -87,7 +90,10 @@ const config: Config = {
   s3Prefix: ''
 };
 
-const client = new ImmuKVClient(config);
+// Identity functions for JSON values (use custom encoders/decoders for complex types)
+const identity = <T>(x: T): T => x;
+
+const client = new ImmuKVClient(config, identity, identity);
 
 // Write
 const entry = await client.set('sensor-012352', { alpha: 0.15, beta: 2.8 });

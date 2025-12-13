@@ -19,7 +19,10 @@ config = Config(
     s3_prefix=""
 )
 
-with ImmuKVClient(config) as client:
+# Identity functions for JSON values (use custom encoders/decoders for complex types)
+def identity(x): return x
+
+with ImmuKVClient(config, identity, identity) as client:
     # Write
     entry = client.set("key1", {"value": "data"})
     print(f"Committed: {entry.version_id}")
