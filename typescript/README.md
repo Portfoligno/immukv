@@ -19,7 +19,10 @@ const config: Config = {
   s3Prefix: '',
 };
 
-const client = new ImmuKVClient(config);
+// Identity functions for JSON values (use custom encoders/decoders for complex types)
+const identity = <T>(x: T): T => x;
+
+const client = new ImmuKVClient(config, identity, identity);
 
 // Write
 const entry = await client.set('key1', { value: 'data' });
