@@ -313,18 +313,32 @@ immukv/
 │   └── package.json
 ├── python/              # Python package
 │   ├── src/immukv/
+│   │   ├── _internal/           # Internal implementation details
+│   │   │   ├── __init__.py
+│   │   │   ├── json_helpers.py  # Internal JSON utilities
+│   │   │   ├── s3_client.py     # S3 client implementation
+│   │   │   ├── s3_helpers.py    # S3 helper functions
+│   │   │   ├── s3_types.py      # S3-related type definitions
+│   │   │   └── types.py         # Internal type definitions
 │   │   ├── __init__.py
-│   │   ├── client.py       # Main client implementation
-│   │   ├── json_helpers.py # JSON serialization helpers
-│   │   └── types.py        # Type definitions
+│   │   ├── client.py            # Main client implementation
+│   │   ├── json_helpers.py      # JSON serialization helpers
+│   │   ├── py.typed             # PEP 561 marker for type hints
+│   │   └── types.py             # Type definitions
 │   ├── tests/
 │   └── pyproject.toml
 ├── typescript/          # TypeScript package
 │   ├── src/
+│   │   ├── internal/            # Internal implementation details
+│   │   │   ├── jsonHelpers.ts   # Internal JSON utilities
+│   │   │   ├── s3Client.ts      # S3 client implementation
+│   │   │   ├── s3Helpers.ts     # S3 helper functions
+│   │   │   ├── s3Types.ts       # S3-related type definitions
+│   │   │   └── types.ts         # Internal type definitions
 │   │   ├── index.ts
-│   │   ├── client.ts       # Main client implementation
-│   │   ├── jsonHelpers.ts  # JSON serialization helpers
-│   │   └── types.ts        # Type definitions
+│   │   ├── client.ts            # Main client implementation
+│   │   ├── jsonHelpers.ts       # JSON serialization helpers
+│   │   └── types.ts             # Type definitions
 │   ├── tests/
 │   └── package.json
 └── README.md
