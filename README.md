@@ -183,7 +183,7 @@ const config: Config = {
   s3Bucket: 'bucket-name',
   s3Region: 'us-east-1',
   s3Prefix: '',
-  kmsKeyId?: string,  // Optional KMS encryption
+  // kmsKeyId: 'optional-key-id',  // Optional KMS encryption
   repairCheckIntervalMs: 300000,  // 5 minutes
   readOnly: false  // Set true to disable writes
 };
