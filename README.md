@@ -310,6 +310,7 @@ immukv/
 │   │   ├── index.ts
 │   │   └── immukv.ts   # CDK construct implementation
 │   ├── test/
+│   ├── tsconfig.test.json
 │   └── package.json
 ├── python/              # Python package
 │   ├── src/immukv/
@@ -340,6 +341,8 @@ immukv/
 │   │   ├── jsonHelpers.ts       # JSON serialization helpers
 │   │   └── types.ts             # Type definitions
 │   ├── tests/
+│   ├── tsconfig.json
+│   ├── tsconfig.test.json
 │   └── package.json
 └── README.md
 ```
