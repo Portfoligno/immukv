@@ -12,23 +12,40 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       checks: ${{ steps.find-checks.outputs.checks }}
+      active: ${{ steps.check-activity.outputs.active }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'schedule' && 'main' || github.ref }}
+          fetch-depth: 1
+
+      - name: Check repository activity
+        id: check-activity
+        run: |
+          last_commit=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          days_inactive=$(( (now - last_commit) / 86400 ))
+          echo Days since last commit: "$days_inactive"
+          if [ "$days_inactive" -ge 90 ]; then
+            echo Repository inactive for over 90 days - skipping automated checks
+            printf active=false\\n >>$GITHUB_OUTPUT
+          else
+            printf active=true\\n >>$GITHUB_OUTPUT
+          fi
 
       - name: Find automated check prompts
+        if: steps.check-activity.outputs.active == 'true'
         id: find-checks
         run: |
           checks=$(find .github/automated-checks -type f -name '*.md' | jq -Rsc 'split("\n")[:-1] | map({path: ., name: split("[./]"; "")[3]})')
-          echo checks="$checks" >>$GITHUB_OUTPUT
+          printf checks=%s\\n "$checks" >>$GITHUB_OUTPUT
           echo Found checks: "$checks"
 
   run-checks:
     name: ${{ matrix.check.name }}
     needs: prepare-checks
-    if: ${{ needs.prepare-checks.outputs.checks != '[]' }}
+    if: ${{ needs.prepare-checks.outputs.active == 'true' && needs.prepare-checks.outputs.checks != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
