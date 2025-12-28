@@ -1,5 +1,6 @@
 # IDE / Editor
 /.idea
+/.serena
 
 # TypeScript
 /typescript/node_modules
