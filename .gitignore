@@ -19,6 +19,14 @@
 /cdk/tsconfig.json
 /cdk/.npmignore
 
+# Packages
+/packages/files/typescript/node_modules
+/packages/files/typescript/dist
+/packages/files/python/src/immukv_files/**/__pycache__
+/packages/files/python/tests/__pycache__
+/packages/files/python/src/immukv_files.egg-info
+/packages/files/python/build
+
 # Project-specific
 /WORKSPACE.md
 /.claude

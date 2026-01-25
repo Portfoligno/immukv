@@ -1,0 +1,49 @@
+{
+  "name": "immukv-files",
+  "version": "0.1.19-dev",
+  "description": "File storage with audit logging using ImmuKV",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest --testMatch='**/tests/unit.test.ts'",
+    "test:client": "jest --testMatch='**/tests/client.test.ts'",
+    "test:integration": "jest --testMatch='**/tests/integration.test.ts'",
+    "type-check": "tsc --project tsconfig.test.json",
+    "lint": "eslint 'src/**/*.ts'",
+    "format": "prettier --write 'src/**/*.ts'"
+  },
+  "keywords": [
+    "immukv",
+    "files",
+    "s3",
+    "audit-log",
+    "immutable"
+  ],
+  "author": "ImmuKV Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Portfoligno/immukv.git",
+    "directory": "packages/files/typescript"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.400.0",
+    "immukv": "file:../../../typescript"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.50.0",
+    "jest": "^29.6.0",
+    "prettier": "^3.0.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.2.0"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ]
+}

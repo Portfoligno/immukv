@@ -7,6 +7,51 @@ on:
       - '[0-9]*.[0-9]*.[0-9]*'
 
 jobs:
+  version-check:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify all versions match tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          echo "Tag version: $TAG_VERSION"
+
+          # Check TypeScript core
+          TS_CORE=$(node -p "require('./typescript/package.json').version")
+          echo "typescript/package.json: $TS_CORE"
+          [ "$TS_CORE" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          # Check TypeScript files
+          TS_FILES=$(node -p "require('./packages/files/typescript/package.json').version")
+          echo "packages/files/typescript/package.json: $TS_FILES"
+          [ "$TS_FILES" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          # Check TypeScript files dependency
+          TS_FILES_DEP=$(node -p "require('./packages/files/typescript/package.json').dependencies.immukv")
+          echo "packages/files/typescript immukv dependency: $TS_FILES_DEP"
+          [ "$TS_FILES_DEP" = "$TAG_VERSION" ] || { echo "Mismatch or not pinned!"; exit 1; }
+
+          # Check Python core
+          pip install --no-cache-dir tomli -q
+          PY_CORE=$(python -c "import tomli; print(tomli.load(open('python/pyproject.toml', 'rb'))['project']['version'])")
+          echo "python/pyproject.toml: $PY_CORE"
+          [ "$PY_CORE" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          # Check Python files
+          PY_FILES=$(python -c "import tomli; print(tomli.load(open('packages/files/python/pyproject.toml', 'rb'))['project']['version'])")
+          echo "packages/files/python/pyproject.toml: $PY_FILES"
+          [ "$PY_FILES" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          # Check Python files dependency
+          PY_FILES_DEP=$(python -c "import tomli; deps=tomli.load(open('packages/files/python/pyproject.toml', 'rb'))['project']['dependencies']; print([d for d in deps if d.startswith('immukv')][0])")
+          echo "packages/files/python immukv dependency: $PY_FILES_DEP"
+          [ "$PY_FILES_DEP" = "immukv==$TAG_VERSION" ] || { echo "Mismatch or not pinned!"; exit 1; }
+
+          echo "All versions match tag $TAG_VERSION"
+
   python:
     runs-on: ubuntu-latest
     container:
@@ -55,18 +100,6 @@ jobs:
         working-directory: python
         run: |
           pytest tests/test_unit.py -v
-
-      - name: Verify version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        working-directory: python
-        run: |
-          pip install --no-cache-dir tomli
-          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          TAG_VERSION=${GITHUB_REF#refs/tags/}
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
 
       - name: Build Python distribution packages
         if: startsWith(github.ref, 'refs/tags/')
@@ -134,17 +167,6 @@ jobs:
         working-directory: typescript
         run: |
           npm test
-
-      - name: Verify version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        working-directory: typescript
-        run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION=${GITHUB_REF#refs/tags/}
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
 
       - name: Upload TypeScript distribution artifacts
         if: startsWith(github.ref, 'refs/tags/')
@@ -336,9 +358,302 @@ jobs:
           name: cdk-python-dist
           path: cdk/dist/python/
 
+  typescript-files:
+    runs-on: ubuntu-latest
+    container:
+      image: node@sha256:d69fb189fa7765636655db043a6a9e6be5ddf94bd1a8dc33fd0bcf4664606a9e
+      # node:18-bullseye-slim
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute version placeholder in core package
+        working-directory: typescript
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/index.ts
+          echo Substituted core version: "$PACKAGE_VERSION"
+          grep -Fx "export const VERSION = '$PACKAGE_VERSION';" src/index.ts
+
+      - name: Install and build core TypeScript package
+        working-directory: typescript
+        run: |
+          npm ci --omit optional
+          npm run build
+
+      - name: Substitute version placeholder in files package
+        working-directory: packages/files/typescript
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/index.ts
+          echo Substituted files version: "$PACKAGE_VERSION"
+          grep -Fx "export const VERSION = \"$PACKAGE_VERSION\";" src/index.ts
+
+      - name: Install TypeScript files dependencies
+        working-directory: packages/files/typescript
+        run: |
+          npm ci --omit optional
+
+      - name: Build TypeScript files with tsc
+        working-directory: packages/files/typescript
+        run: |
+          npm run build
+
+      - name: Type check with tsc
+        working-directory: packages/files/typescript
+        run: |
+          npm run type-check
+
+      - name: Lint with eslint
+        working-directory: packages/files/typescript
+        run: |
+          npm run lint
+
+      - name: Check format with prettier
+        working-directory: packages/files/typescript
+        run: |
+          npx prettier --check "src/**/*.ts"
+
+      - name: Run TypeScript files unit tests with jest
+        working-directory: packages/files/typescript
+        run: |
+          npm test
+
+      - name: Upload TypeScript files distribution artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-files-dist
+          path: |
+            packages/files/typescript/dist/
+            packages/files/typescript/package.json
+            packages/files/typescript/README.md
+
+  python-files:
+    runs-on: ubuntu-latest
+    container:
+      image: python@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db
+      # python:3.12-slim-bullseye
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute version placeholder in core package
+        working-directory: python
+        run: |
+          pip install --no-cache-dir tomli
+          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/immukv/__init__.py
+          echo Substituted core version: "$PACKAGE_VERSION"
+          grep -Fx "__version__ = \"$PACKAGE_VERSION\"" src/immukv/__init__.py
+
+      - name: Install core Python package
+        working-directory: python
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+
+      - name: Substitute version placeholder in files package
+        working-directory: packages/files/python
+        run: |
+          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/immukv_files/__init__.py
+          echo Substituted files version: "$PACKAGE_VERSION"
+          grep -Fx "__version__ = \"$PACKAGE_VERSION\"" src/immukv_files/__init__.py
+
+      - name: Install Python files dependencies
+        working-directory: packages/files/python
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+
+      - name: Type check with mypy
+        working-directory: packages/files/python
+        run: |
+          mypy src/immukv_files tests/
+
+      - name: Lint with ruff
+        working-directory: packages/files/python
+        run: |
+          ruff check src/immukv_files
+
+      - name: Check format with black
+        working-directory: packages/files/python
+        run: |
+          black --check src/immukv_files
+
+      - name: Run Python files unit tests with pytest
+        working-directory: packages/files/python
+        run: |
+          pytest tests/ -v
+
+      - name: Build Python files distribution packages
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: packages/files/python
+        run: |
+          pip install --no-cache-dir build
+          python -m build
+
+      - name: Upload Python files distribution artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-files-dist
+          path: packages/files/python/dist/
+
+  typescript-files-integration:
+    runs-on: ubuntu-latest
+    container:
+      image: node@sha256:d69fb189fa7765636655db043a6a9e6be5ddf94bd1a8dc33fd0bcf4664606a9e
+      # node:18-bullseye-slim
+
+    services:
+      minio:
+        image: docker.io/bitnamilegacy/minio@sha256:b3d51900e846b92f7503ca6be07d2e8c56ebb6a13a60bc71b8777c716c074bcf
+        # bitnamilegacy/minio:latest (amd64 for GitHub Actions x86-64 runners)
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git curl
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute version placeholder in core package
+        working-directory: typescript
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/index.ts
+          echo Substituted core version: "$PACKAGE_VERSION"
+          grep -Fx "export const VERSION = '$PACKAGE_VERSION';" src/index.ts
+
+      - name: Install and build core TypeScript package
+        working-directory: typescript
+        run: |
+          npm ci --omit optional
+          npm run build
+
+      - name: Substitute version placeholder in files package
+        working-directory: packages/files/typescript
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/index.ts
+          echo Substituted files version: "$PACKAGE_VERSION"
+          grep -Fx "export const VERSION = \"$PACKAGE_VERSION\";" src/index.ts
+
+      - name: Install TypeScript files dependencies
+        working-directory: packages/files/typescript
+        run: |
+          npm ci --omit optional
+
+      - name: Wait for MinIO to be ready
+        run: |
+          until curl -sf http://minio:9000/minio/health/live; do
+            echo Waiting for MinIO...
+            sleep 2
+          done
+          echo 'MinIO is ready!'
+
+      - name: Run integration tests against MinIO
+        working-directory: packages/files/typescript
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+          IMMUKV_INTEGRATION_TEST: "true"
+          IMMUKV_S3_ENDPOINT: "http://minio:9000"
+        run: |
+          npm run test:client && npm run test:integration
+
+  python-files-integration:
+    runs-on: ubuntu-latest
+    container:
+      image: python@sha256:411fa4dcfdce7e7a3057c45662beba9dcd4fa36b2e50a2bfcd6c9333e59bf0db
+      # python:3.12-slim-bullseye
+
+    services:
+      minio:
+        image: docker.io/bitnamilegacy/minio@sha256:b3d51900e846b92f7503ca6be07d2e8c56ebb6a13a60bc71b8777c716c074bcf
+        # bitnamilegacy/minio:latest (amd64 for GitHub Actions x86-64 runners)
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+
+    steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates git curl
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Substitute version placeholder in core package
+        working-directory: python
+        run: |
+          pip install --no-cache-dir tomli
+          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/immukv/__init__.py
+          echo Substituted core version: "$PACKAGE_VERSION"
+          grep -Fx "__version__ = \"$PACKAGE_VERSION\"" src/immukv/__init__.py
+
+      - name: Install core Python package
+        working-directory: python
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+
+      - name: Substitute version placeholder in files package
+        working-directory: packages/files/python
+        run: |
+          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          sed -i s/__VERSION_EeEyfbyVyf4JmFfk__/"$PACKAGE_VERSION"/g src/immukv_files/__init__.py
+          echo Substituted files version: "$PACKAGE_VERSION"
+          grep -Fx "__version__ = \"$PACKAGE_VERSION\"" src/immukv_files/__init__.py
+
+      - name: Install Python files dependencies
+        working-directory: packages/files/python
+        run: |
+          pip install --no-cache-dir -e ".[dev]"
+
+      - name: Wait for MinIO to be ready
+        run: |
+          until curl -sf http://minio:9000/minio/health/live; do
+            echo Waiting for MinIO...
+            sleep 2
+          done
+          echo 'MinIO is ready!'
+
+      - name: Run integration tests against MinIO
+        working-directory: packages/files/python
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: us-east-1
+          IMMUKV_INTEGRATION_TEST: "true"
+          IMMUKV_S3_ENDPOINT: "http://minio:9000"
+        run: |
+          pytest tests/ -v -s
+
   ready-to-publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [python, typescript, cdk, python-integration, typescript-integration]
+    needs: [version-check, python, typescript, cdk, python-integration, typescript-integration, typescript-files, python-files, typescript-files-integration, python-files-integration]
     runs-on: ubuntu-latest
     steps:
       - name: All builds and integration tests passed
@@ -425,6 +740,49 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: cdk-python-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-typescript-files:
+    needs: ready-to-publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: typescript-files-dist
+          path: .
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Upgrade npm for OIDC support
+        run: |
+          npm install -g npm@11.5.1
+          npm --version
+
+      - name: Publish to npm with OIDC
+        run: |
+          npm publish --access public
+
+  publish-python-files:
+    needs: ready-to-publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-files-dist
           path: dist/
 
       - name: Publish to PyPI
