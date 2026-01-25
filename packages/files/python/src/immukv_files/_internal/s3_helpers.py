@@ -1,30 +1,49 @@
-"""Helper functions for S3 file operations.
+"""Helper types for S3 file operations.
 
-These functions are not part of the public API and should only be used internally.
+These types are not part of the public API and should only be used internally.
+This module provides output type definitions for async S3 operations.
 """
 
-from typing import TYPE_CHECKING, Generic, Iterator, Literal, Optional, TypedDict, TypeVar
+from typing import Any, AsyncIterator, Generic, Mapping, Optional, TypedDict, TypeVar, cast
 
-if TYPE_CHECKING:
-    from mypy_boto3_s3.client import S3Client
-    from mypy_boto3_s3.type_defs import (
-        GetBucketVersioningOutputTypeDef,
-        GetObjectOutputTypeDef,
-        HeadBucketOutputTypeDef,
-        PutObjectOutputTypeDef,
-    )
-
-from immukv_files.types import FileS3Key, FileVersionId
+from immukv_files.types import FileVersionId
 from immukv_files._internal.types import file_version_id_from_boto3
 
 K = TypeVar("K", bound=str)
+T = TypeVar("T")
 
 
-def assert_boto3_field_present(value: Optional[object], field_name: str) -> object:
-    """Assert that a field marked optional by boto3 types is actually present.
+class ErrorResponse(TypedDict):
+    """Boto3 error response structure."""
 
-    The boto3 TypeScript types incorrectly mark many fields as optional due to
-    Smithy type generation bugs. This helper asserts that fields which are
+    Code: str
+    Message: str
+
+
+class ClientErrorResponse(TypedDict):
+    """Boto3 ClientError response structure."""
+
+    Error: ErrorResponse
+
+
+def get_error_code(error: Exception) -> str:
+    """Extract error code from ClientError.
+
+    Centralizes ClientError response access to satisfy disallow_any_expr.
+    """
+    error_response = cast(ClientErrorResponse, cast(Any, error).response)  # type: ignore[misc,explicit-any]
+    return cast(str, error_response["Error"]["Code"])
+
+
+# Type alias for aiobotocore responses (same structure as boto3, but Any typed)
+AiobotocoreResponse = Mapping[str, Any]  # type: ignore[explicit-any]
+
+
+def assert_aws_field_present(value: Optional[T], field_name: str) -> T:
+    """Assert that a field marked optional by AWS SDK types is actually present.
+
+    The boto3-stubs types incorrectly mark many fields as optional when they
+    are always returned by AWS. This helper asserts that fields which are
     always returned by AWS are actually present at runtime.
 
     Args:
@@ -35,11 +54,11 @@ def assert_boto3_field_present(value: Optional[object], field_name: str) -> obje
         The value with None removed from type
 
     Raises:
-        ValueError: If value is None (indicates boto3 bug or API change)
+        ValueError: If value is None (indicates AWS SDK bug or API change)
     """
     if value is None:
         raise ValueError(
-            f"boto3 type bug: {field_name} is None but should always be present. "
+            f"AWS SDK type bug: {field_name} is None but should always be present. "
             "This may indicate an AWS API change or SDK bug."
         )
     return value
@@ -56,11 +75,17 @@ class FilePutObjectOutputs:
     """Helper functions for file PutObjectOutput."""
 
     @staticmethod
-    def from_boto3(response: "PutObjectOutputTypeDef") -> FilePutObjectOutput[K]:
-        """Convert boto3 PutObjectOutput to our FilePutObjectOutput type."""
-        etag = assert_boto3_field_present(response.get("ETag"), "PutObjectOutput.ETag")
+    def from_aiobotocore(response: AiobotocoreResponse) -> FilePutObjectOutput[K]:
+        """Convert aiobotocore response to FilePutObjectOutput.
+
+        Args:
+            response: Raw aiobotocore put_object response
+
+        Returns:
+            FilePutObjectOutput with validated required fields
+        """
         return {
-            "etag": str(etag),
+            "etag": assert_aws_field_present(response.get("ETag"), "PutObjectOutput.ETag"),
             "version_id": response.get("VersionId"),
         }
 
@@ -89,11 +114,18 @@ class FileDeleteObjectOutputs:
     """Helper functions for file DeleteObjectOutput."""
 
     @staticmethod
-    def from_boto3(response: dict[str, object]) -> FileDeleteObjectOutput[K]:
-        """Convert boto3 DeleteObjectOutput to our FileDeleteObjectOutput type."""
+    def from_aiobotocore(response: AiobotocoreResponse) -> FileDeleteObjectOutput[K]:
+        """Convert aiobotocore response to FileDeleteObjectOutput.
+
+        Args:
+            response: Raw aiobotocore delete_object response
+
+        Returns:
+            FileDeleteObjectOutput with optional fields
+        """
         return {
-            "delete_marker": response.get("DeleteMarker"),  # type: ignore[typeddict-item]
-            "version_id": response.get("VersionId"),  # type: ignore[typeddict-item]
+            "delete_marker": response.get("DeleteMarker"),
+            "version_id": response.get("VersionId"),
         }
 
     @staticmethod
@@ -113,9 +145,9 @@ class FileDeleteObjectOutputs:
 
 
 class FileGetObjectOutput(TypedDict, Generic[K]):
-    """GetObjectOutput with corrected field optionality for file operations."""
+    """GetObjectOutput with corrected field optionality for async file operations."""
 
-    body: Iterator[bytes]
+    body: AsyncIterator[bytes]
     etag: str
     version_id: Optional[str]
     content_length: int
@@ -123,33 +155,89 @@ class FileGetObjectOutput(TypedDict, Generic[K]):
     metadata: Optional[dict[str, str]]
 
 
+class GetBucketVersioningOutput(TypedDict):
+    """S3 GetBucketVersioning response with corrected field optionality."""
+
+    Status: Optional[str]
+    MFADelete: Optional[str]
+
+
+class GetBucketVersioningOutputs:
+    """Helper functions for GetBucketVersioningOutput."""
+
+    @staticmethod
+    def from_aiobotocore(response: AiobotocoreResponse) -> GetBucketVersioningOutput:
+        """Convert aiobotocore response to GetBucketVersioningOutput.
+
+        Args:
+            response: Raw aiobotocore get_bucket_versioning response
+
+        Returns:
+            GetBucketVersioningOutput with optional fields
+        """
+        return {
+            "Status": response.get("Status"),
+            "MFADelete": response.get("MFADelete"),
+        }
+
+
+class HeadBucketOutput(TypedDict):
+    """S3 HeadBucket response (minimal fields needed for validation)."""
+
+    BucketLocationType: Optional[str]
+    BucketLocationName: Optional[str]
+    BucketRegion: Optional[str]
+    AccessPointAlias: Optional[bool]
+
+
+class HeadBucketOutputs:
+    """Helper functions for HeadBucketOutput."""
+
+    @staticmethod
+    def from_aiobotocore(response: AiobotocoreResponse) -> HeadBucketOutput:
+        """Convert aiobotocore response to HeadBucketOutput.
+
+        Args:
+            response: Raw aiobotocore head_bucket response
+
+        Returns:
+            HeadBucketOutput with optional fields
+        """
+        return {
+            "BucketLocationType": response.get("BucketLocationType"),
+            "BucketLocationName": response.get("BucketLocationName"),
+            "BucketRegion": response.get("BucketRegion"),
+            "AccessPointAlias": response.get("AccessPointAlias"),
+        }
+
+
 class FileGetObjectOutputs:
     """Helper functions for file GetObjectOutput."""
 
     @staticmethod
-    def from_boto3(response: "GetObjectOutputTypeDef") -> FileGetObjectOutput[K]:
-        """Convert boto3 GetObjectOutput to our FileGetObjectOutput type."""
-        body = assert_boto3_field_present(response.get("Body"), "GetObjectOutput.Body")
-        etag = assert_boto3_field_present(response.get("ETag"), "GetObjectOutput.ETag")
-        content_length = assert_boto3_field_present(
-            response.get("ContentLength"), "GetObjectOutput.ContentLength"
-        )
+    def from_aiobotocore(
+        response: AiobotocoreResponse,
+        body_iterator: AsyncIterator[bytes],
+    ) -> FileGetObjectOutput[K]:
+        """Convert aiobotocore response to FileGetObjectOutput.
 
-        # Body is a StreamingBody, iterate over it
-        # StreamingBody.iter_chunks() returns Iterator[bytes]
-        streaming_body = body  # type: ignore[assignment]
+        Unlike the core package which reads body immediately for small JSON objects,
+        file operations use streaming to handle large files efficiently.
 
-        def body_iterator() -> Iterator[bytes]:
-            """Iterate over streaming body in chunks."""
-            # iter_chunks returns Iterator[bytes] but mypy doesn't see it
-            for chunk in streaming_body.iter_chunks():  # type: ignore[misc,union-attr,attr-defined]
-                yield chunk  # type: ignore[misc]
+        Args:
+            response: Raw aiobotocore get_object response
+            body_iterator: Async iterator over body chunks (caller manages stream lifecycle)
 
+        Returns:
+            FileGetObjectOutput with validated required fields and streaming body
+        """
         return {
-            "body": body_iterator(),
-            "etag": str(etag),
+            "body": body_iterator,
+            "etag": assert_aws_field_present(response.get("ETag"), "GetObjectOutput.ETag"),
             "version_id": response.get("VersionId"),
-            "content_length": int(str(content_length)),
+            "content_length": assert_aws_field_present(
+                response.get("ContentLength"), "GetObjectOutput.ContentLength"
+            ),
             "content_type": response.get("ContentType"),
             "metadata": response.get("Metadata"),
         }
@@ -161,86 +249,3 @@ class FileGetObjectOutputs:
         if version_id is not None:
             return file_version_id_from_boto3(version_id)
         return None
-
-
-class FileS3Client:
-    """Branded S3 client wrapper for file operations."""
-
-    def __init__(self, s3_client: "S3Client") -> None:
-        """Initialize with a boto3 S3 client."""
-        self._s3 = s3_client
-
-    def put_object(
-        self,
-        bucket: str,
-        key: FileS3Key[K],
-        body: bytes,
-        content_type: Optional[str] = None,
-        metadata: Optional[dict[str, str]] = None,
-        sse_kms_key_id: Optional[str] = None,
-        server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
-    ) -> FilePutObjectOutput[K]:
-        """Upload file to S3."""
-        request: dict[str, object] = {
-            "Bucket": bucket,
-            "Key": key,
-            "Body": body,
-        }
-        if content_type is not None:
-            request["ContentType"] = content_type
-        else:
-            request["ContentType"] = "application/octet-stream"
-        if metadata is not None:
-            request["Metadata"] = metadata
-        if sse_kms_key_id is not None:
-            request["SSEKMSKeyId"] = sse_kms_key_id
-        if server_side_encryption is not None:
-            request["ServerSideEncryption"] = server_side_encryption
-
-        response: "PutObjectOutputTypeDef" = self._s3.put_object(**request)  # type: ignore[arg-type]
-        return FilePutObjectOutputs.from_boto3(response)
-
-    def get_object(
-        self,
-        bucket: str,
-        key: FileS3Key[K],
-        version_id: Optional[FileVersionId[K]] = None,
-    ) -> FileGetObjectOutput[K]:
-        """Download file from S3."""
-        request: dict[str, object] = {
-            "Bucket": bucket,
-            "Key": key,
-        }
-        if version_id is not None:
-            request["VersionId"] = version_id
-
-        response: "GetObjectOutputTypeDef" = self._s3.get_object(**request)  # type: ignore[arg-type]
-        return FileGetObjectOutputs.from_boto3(response)
-
-    def delete_object(
-        self,
-        bucket: str,
-        key: FileS3Key[K],
-    ) -> FileDeleteObjectOutput[K]:
-        """Delete file from S3.
-
-        In a versioned bucket, this creates a delete marker rather than
-        permanently removing the object. The returned version_id is the
-        delete marker's version ID.
-        """
-        response = self._s3.delete_object(Bucket=bucket, Key=key)
-        # Cast to dict for from_boto3 - TypedDict is compatible at runtime
-        return FileDeleteObjectOutputs.from_boto3(dict(response))  # type: ignore[arg-type]
-
-    def get_bucket_versioning(self, bucket: str) -> "GetBucketVersioningOutputTypeDef":
-        """Check bucket versioning status."""
-        return self._s3.get_bucket_versioning(Bucket=bucket)
-
-    def head_bucket(self, bucket: str) -> "HeadBucketOutputTypeDef":
-        """Head request to check bucket access."""
-        return self._s3.head_bucket(Bucket=bucket)
-
-    @property
-    def client(self) -> "S3Client":
-        """Direct access to underlying S3Client for operations not wrapped."""
-        return self._s3

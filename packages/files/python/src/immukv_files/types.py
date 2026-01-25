@@ -1,7 +1,7 @@
 """Type definitions for ImmuKV file storage."""
 
 from dataclasses import dataclass
-from typing import Generic, Iterator, Optional, TypeVar, Union
+from typing import AsyncIterator, Generic, Optional, TypeVar, Union
 
 from immukv.types import Entry, KeyVersionId, S3Credentials
 
@@ -163,13 +163,22 @@ class GetFileOptions(Generic[K]):
 
 @dataclass
 class FileDownload(Generic[K]):
-    """Return type for get_file()."""
+    """Return type for get_file().
+
+    Contains the file entry metadata and an async iterator
+    for streaming file content.
+
+    Usage:
+        download = await client.get_file("key")
+        async for chunk in download.stream:
+            process(chunk)
+    """
 
     # The file entry metadata from the log.
     entry: Entry[K, FileValue[K]]
 
-    # Iterator of file content chunks (bytes).
-    stream: Iterator[bytes]
+    # Async iterator of file content chunks (bytes).
+    stream: AsyncIterator[bytes]
 
 
 def is_deleted_file(value: FileValue[K]) -> bool:
@@ -196,10 +205,18 @@ def is_active_file(value: FileValue[K]) -> bool:
     return isinstance(value, FileMetadata)
 
 
-class FileNotFoundError(Exception):
-    """Error thrown when a file is not found."""
+class FileKeyNotFoundError(Exception):
+    """Error thrown when a file key is not found.
+
+    Renamed from FileNotFoundError to avoid shadowing Python's
+    builtin FileNotFoundError (an OSError subclass).
+    """
 
     pass
+
+
+# Backwards compatibility alias (deprecated)
+FileNotFoundError = FileKeyNotFoundError
 
 
 class FileDeletedError(Exception):

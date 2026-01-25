@@ -3,7 +3,7 @@
 These types are not part of the public API and should only be used internally.
 """
 
-from typing import TYPE_CHECKING, Generic, List, TypedDict, TypeVar, Optional
+from typing import TYPE_CHECKING, Generic, List, Optional, TypedDict, TypeVar, Union
 
 from immukv.types import KeyObjectETag, KeyVersionId, LogVersionId
 
@@ -14,6 +14,14 @@ if TYPE_CHECKING:
         ListObjectVersionsOutputTypeDef,
         ObjectVersionTypeDef,
         PutObjectOutputTypeDef,
+    )
+    from types_aiobotocore_s3.type_defs import (
+        GetObjectOutputTypeDef as AioGetObjectOutputTypeDef,
+        HeadObjectOutputTypeDef as AioHeadObjectOutputTypeDef,
+        ListObjectVersionsOutputTypeDef as AioListObjectVersionsOutputTypeDef,
+        ListObjectsV2OutputTypeDef as AioListObjectsV2OutputTypeDef,
+        ObjectVersionTypeDef as AioObjectVersionTypeDef,
+        PutObjectOutputTypeDef as AioPutObjectOutputTypeDef,
     )
 
 # Type variables
@@ -97,9 +105,11 @@ class GetObjectOutput(TypedDict, Generic[K]):
 
     AWS SDK types are incorrect due to boto3-stubs bugs.
     This type reflects actual AWS API behavior per documentation.
+
+    Note: Body can be StreamingBody (sync) or pre-read bytes (async).
     """
 
-    Body: object  # StreamingBody - always returned per AWS docs
+    Body: Union[object, bytes]  # StreamingBody (sync) or bytes (async)
     ETag: str  # Always returned per AWS docs
     VersionId: Optional[str]  # Optional (absent when versioning disabled)
 
@@ -116,6 +126,25 @@ class GetObjectOutputs:
         """
         return {
             "Body": assert_aws_field_present(response.get("Body"), "GetObjectOutput.Body"),
+            "ETag": assert_aws_field_present(response.get("ETag"), "GetObjectOutput.ETag"),
+            "VersionId": response.get("VersionId"),
+        }
+
+    @staticmethod
+    def from_aiobotocore(
+        response: "AioGetObjectOutputTypeDef", body_content: bytes
+    ) -> GetObjectOutput[K]:
+        """Convert aiobotocore response to branded output.
+
+        Unlike boto3, the body is pre-read into bytes for aiobotocore responses
+        since aiobotocore uses async streaming that must be awaited.
+
+        Args:
+            response: The raw aiobotocore response
+            body_content: Pre-read body content as bytes
+        """
+        return {
+            "Body": body_content,
             "ETag": assert_aws_field_present(response.get("ETag"), "GetObjectOutput.ETag"),
             "VersionId": response.get("VersionId"),
         }
@@ -152,6 +181,17 @@ class PutObjectOutputs:
 
         Reconstructs the response with correct field optionality, asserting
         that fields which should always be present are actually present.
+        """
+        return {
+            "ETag": assert_aws_field_present(response.get("ETag"), "PutObjectOutput.ETag"),
+            "VersionId": response.get("VersionId"),
+        }
+
+    @staticmethod
+    def from_aiobotocore(response: "AioPutObjectOutputTypeDef") -> PutObjectOutput[K]:
+        """Convert aiobotocore response to branded output.
+
+        Same logic as from_boto3 - aiobotocore uses identical type definitions.
         """
         return {
             "ETag": assert_aws_field_present(response.get("ETag"), "PutObjectOutput.ETag"),
@@ -197,6 +237,17 @@ class HeadObjectOutputs:
         }
 
     @staticmethod
+    def from_aiobotocore(response: "AioHeadObjectOutputTypeDef") -> HeadObjectOutput[K]:
+        """Convert aiobotocore response to branded output.
+
+        Same logic as from_boto3 - aiobotocore uses identical type definitions.
+        """
+        return {
+            "ETag": assert_aws_field_present(response.get("ETag"), "HeadObjectOutput.ETag"),
+            "VersionId": response.get("VersionId"),
+        }
+
+    @staticmethod
     def log_version_id(response: HeadObjectOutput[LogKey]) -> Optional[LogVersionId[K]]:
         """Extract LogVersionId from HeadObject response (for log operations)."""
         version_id = response.get("VersionId")
@@ -230,6 +281,21 @@ class ObjectVersions:
 
         Reconstructs the object with correct field optionality, asserting
         that fields which should always be present are actually present.
+        """
+        return {
+            "Key": assert_aws_field_present(version.get("Key"), "ObjectVersion.Key"),
+            "VersionId": assert_aws_field_present(
+                version.get("VersionId"), "ObjectVersion.VersionId"
+            ),
+            "IsLatest": assert_aws_field_present(version.get("IsLatest"), "ObjectVersion.IsLatest"),
+            "ETag": assert_aws_field_present(version.get("ETag"), "ObjectVersion.ETag"),
+        }
+
+    @staticmethod
+    def from_aiobotocore(version: "AioObjectVersionTypeDef") -> ObjectVersion[K]:
+        """Convert aiobotocore version dict to branded output.
+
+        Same logic as from_boto3 - aiobotocore uses identical type definitions.
         """
         return {
             "Key": assert_aws_field_present(version.get("Key"), "ObjectVersion.Key"),
@@ -286,6 +352,26 @@ class ListObjectVersionsOutputs:
             "NextVersionIdMarker": response.get("NextVersionIdMarker"),
         }
 
+    @staticmethod
+    def from_aiobotocore(
+        response: "AioListObjectVersionsOutputTypeDef",
+    ) -> ListObjectVersionsOutput[K]:
+        """Convert aiobotocore response to branded output.
+
+        Same logic as from_boto3 - aiobotocore uses identical type definitions.
+        """
+        versions = response.get("Versions")
+        return {
+            "IsTruncated": assert_aws_field_present(
+                response.get("IsTruncated"), "ListObjectVersionsOutput.IsTruncated"
+            ),
+            "Versions": (
+                None if versions is None else [ObjectVersions.from_aiobotocore(v) for v in versions]
+            ),
+            "NextKeyMarker": response.get("NextKeyMarker"),
+            "NextVersionIdMarker": response.get("NextVersionIdMarker"),
+        }
+
 
 class Object(TypedDict):
     """S3 object in list response."""
@@ -303,6 +389,29 @@ class ListObjectsV2Output(TypedDict):
     Contents: Optional[List[Object]]  # Optional (can be empty)
     IsTruncated: bool  # Always returned per AWS docs
     NextContinuationToken: Optional[str]  # Optional (only when IsTruncated=true)
+
+
+class ListObjectsV2Outputs:
+    """Namespace for ListObjectsV2Output helper functions."""
+
+    @staticmethod
+    def from_aiobotocore(response: "AioListObjectsV2OutputTypeDef") -> ListObjectsV2Output:
+        """Convert aiobotocore response to branded output."""
+        contents = response.get("Contents")
+        contents_list: Optional[List[Object]] = None
+        if contents is not None:
+            for obj in contents:
+                key_str = assert_aws_field_present(obj.get("Key"), "Object.Key")
+                if contents_list is None:
+                    contents_list = []
+                contents_list.append({"Key": key_str})
+        return {
+            "IsTruncated": assert_aws_field_present(
+                response.get("IsTruncated"), "ListObjectsV2Output.IsTruncated"
+            ),
+            "Contents": contents_list,
+            "NextContinuationToken": response.get("NextContinuationToken"),
+        }
 
 
 class ErrorResponse(TypedDict):

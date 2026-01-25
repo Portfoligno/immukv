@@ -1,8 +1,12 @@
-"""FileClient implementation for ImmuKV file storage."""
+"""Async-only FileClient implementation for ImmuKV file storage."""
 
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    AsyncIterator,
     BinaryIO,
     Generic,
     List,
@@ -12,14 +16,13 @@ from typing import (
     Union,
 )
 
-import boto3
-from botocore.config import Config as BotocoreConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 if TYPE_CHECKING:
-    from mypy_boto3_s3.client import S3Client
+    from types_aiobotocore_s3 import S3Client as AioS3Client
 
-from immukv import ImmuKVClient, Config as ImmuKVConfig, KeyVersionId, Entry
+from immukv import ImmuKVClient, Entry, KeyNotFoundError
+from immukv.types import KeyVersionId
 from immukv.json_helpers import JSONValue
 
 from immukv_files.types import (
@@ -29,7 +32,7 @@ from immukv_files.types import (
     FileDeletedError,
     FileDownload,
     FileMetadata,
-    FileNotFoundError,
+    FileKeyNotFoundError,
     FileS3Key,
     FileStorageConfig,
     FileValue,
@@ -40,37 +43,41 @@ from immukv_files.types import (
     is_deleted_file,
 )
 from immukv_files._internal.types import (
-    UploadResult,
     content_hash_from_json,
     file_s3_key_for_file,
 )
-from immukv_files._internal.hashing import (
-    compute_hash_from_bytes,
-    compute_hash_from_file,
-    compute_hash_from_path,
-)
-from immukv_files._internal.s3_helpers import (
-    FileS3Client,
-    FilePutObjectOutputs,
-    FileDeleteObjectOutputs,
-)
+from immukv_files._internal.async_s3_client import AsyncFileS3Client
+from immukv_files._internal.s3_helpers import FilePutObjectOutput, get_error_code
 
 K = TypeVar("K", bound=str)
 
 
 class FileClient(Generic[K]):
-    """FileClient for storing and retrieving files with ImmuKV audit logging.
+    """Async-only file storage client with ImmuKV audit logging.
 
-    Uses three-phase write protocol:
-    1. Upload file to S3 (compute hash during upload)
-    2. Write log entry to ImmuKV (commit point)
-    3. Write key object for fast lookup (best effort)
+    All public methods are async coroutines. No sync API is provided.
+
+    Usage:
+        async with ImmuKVClient.create(config, decoder, encoder) as kv:
+            async with FileClient.create(kv) as files:
+                entry = await files.set_file("doc.pdf", Path("/tmp/doc.pdf"))
+                download = await files.get_file("doc.pdf")
+                async for chunk in download.stream:
+                    ...
+
+    Three-phase write protocol:
+        1. Upload file to S3 (async, compute hash during upload)
+        2. Write log entry to ImmuKV (async, commit point)
+        3. Write key object (async, handled by kv_client.set)
+
+    Three-phase delete protocol:
+        1. Delete S3 object (async, creates delete marker)
+        2. Write tombstone to ImmuKV log (async)
+        3. Update key object (async, handled by kv_client.set)
     """
 
-    # Instance field type annotations
     _kv_client: ImmuKVClient[K, FileValue[K]]
-    _file_s3: FileS3Client
-    _owns_s3_client: bool
+    _async_s3: AsyncFileS3Client[K]
     _file_bucket: str
     _file_prefix: str
     _kms_key_id: Optional[str]
@@ -78,127 +85,101 @@ class FileClient(Generic[K]):
     def __init__(
         self,
         kv_client: ImmuKVClient[K, FileValue[K]],
-        config: Optional[FileStorageConfig] = None,
+        async_s3: AsyncFileS3Client[K],
+        file_bucket: str,
+        file_prefix: str,
+        kms_key_id: Optional[str] = None,
     ) -> None:
-        """Create a FileClient.
+        """Initialize FileClient (internal - use create() factory)."""
+        self._kv_client = kv_client
+        self._async_s3 = async_s3
+        self._file_bucket = file_bucket
+        self._file_prefix = file_prefix
+        self._kms_key_id = kms_key_id
 
-        For most use cases, prefer the static `create()` factory method
-        which validates bucket access and versioning.
+    # =========================================================================
+    # Factory Method
+    # =========================================================================
+
+    @classmethod
+    @asynccontextmanager
+    async def create(
+        cls,
+        kv_client: ImmuKVClient[K, FileValue[K]],
+        config: Optional[FileStorageConfig] = None,
+    ) -> AsyncIterator["FileClient[K]"]:
+        """Create FileClient with managed lifecycle.
+
+        Shares the aiobotocore session from the kv_client for efficiency.
+        Validates bucket access and versioning before yielding.
 
         Args:
-            kv_client: ImmuKV client for log operations
+            kv_client: Async ImmuKV client for metadata operations
             config: Optional file storage configuration
+
+        Yields:
+            Configured FileClient ready for use
+
+        Example:
+            async with ImmuKVClient.create(config, decoder, encoder) as kv:
+                async with FileClient.create(kv) as files:
+                    await files.set_file("key", data)
         """
-        self._kv_client = kv_client
-
-        # Access internal config from kv_client
-        kv_config: ImmuKVConfig = kv_client._config  # type: ignore[attr-defined]
-
-        # Determine S3 client sharing
-        same_region = (config.region if config else None) is None or (
-            config is not None and config.region == kv_config.s3_region
-        )
-        same_overrides = config is None or config.overrides is None
-        same_bucket = config is None or config.bucket is None
-
-        if same_bucket and same_region and same_overrides:
-            # Share S3 client from kv_client
-            self._file_s3 = FileS3Client(kv_client._s3._s3)  # type: ignore[attr-defined]
-            self._owns_s3_client = False
-        else:
-            # Create separate S3 client
-            client_params: dict[str, object] = {
-                "region_name": config.region if config and config.region else kv_config.s3_region,
-            }
-
-            if config and config.overrides:
-                if config.overrides.endpoint_url:
-                    client_params["endpoint_url"] = config.overrides.endpoint_url
-                if config.overrides.credentials:
-                    client_params["aws_access_key_id"] = (
-                        config.overrides.credentials.aws_access_key_id
-                    )
-                    client_params["aws_secret_access_key"] = (
-                        config.overrides.credentials.aws_secret_access_key
-                    )
-                if config.overrides.force_path_style:
-                    client_params["config"] = BotocoreConfig(s3={"addressing_style": "path"})
-
-            raw_s3: "S3Client" = boto3.client("s3", **client_params)  # type: ignore[assignment,call-overload]
-            self._file_s3 = FileS3Client(raw_s3)
-            self._owns_s3_client = True
+        # Get configuration from kv_client
+        kv_config = kv_client._config
 
         # Determine file bucket and prefix
-        self._file_bucket = config.bucket if config and config.bucket else kv_config.s3_bucket
+        file_bucket = config.bucket if config and config.bucket else kv_config.s3_bucket
         if config and config.bucket is not None:
             # Different bucket: default to no prefix
-            self._file_prefix = config.prefix if config.prefix is not None else ""
+            file_prefix = config.prefix if config.prefix is not None else ""
         else:
             # Same bucket: default to "files/" prefix under kv_client prefix
-            self._file_prefix = (
+            file_prefix = (
                 config.prefix
                 if config and config.prefix is not None
                 else f"{kv_config.s3_prefix}files/"
             )
 
-        self._kms_key_id = config.kms_key_id if config else None
+        kms_key_id = config.kms_key_id if config else None
 
-    @classmethod
-    def create(
-        cls,
-        kv_client: ImmuKVClient[K, FileValue[K]],
-        config: Optional[FileStorageConfig] = None,
-    ) -> "FileClient[K]":
-        """Create a FileClient with validation.
+        # Get the S3 client from kv_client
+        # The kv_client should expose a method to get the aiobotocore client
+        aio_s3_client: "AioS3Client" = kv_client._s3._s3
+        async_s3: AsyncFileS3Client[K] = AsyncFileS3Client(aio_s3_client)
 
-        Validates bucket access and versioning status before returning.
-        This is the recommended way to create a FileClient.
+        client = cls(kv_client, async_s3, file_bucket, file_prefix, kms_key_id)
 
-        Args:
-            kv_client: ImmuKV client for log operations
-            config: Optional file storage configuration
-
-        Returns:
-            Validated FileClient
-
-        Raises:
-            ConfigurationError: If bucket is inaccessible or versioning disabled
-        """
-        client: FileClient[K] = cls(kv_client, config)
-
+        # Validate bucket access and versioning
         validate_access = config.validate_access if config else True
         validate_versioning = config.validate_versioning if config else True
 
         if validate_access:
-            try:
-                client._file_s3.head_bucket(client._file_bucket)
-            except ClientError as e:  # type: ignore[misc]
-                raise ConfigurationError(
-                    f"Cannot access file bucket '{client._file_bucket}': {e}"
-                ) from e
+            await async_s3.head_bucket(file_bucket)
 
         if validate_versioning:
-            client._validate_versioning()
+            await client._validate_bucket()
 
-        return client
+        yield client
 
-    @property
-    def kv_client(self) -> ImmuKVClient[K, FileValue[K]]:
-        """The underlying ImmuKV client for log operations."""
-        return self._kv_client
+    # =========================================================================
+    # File Operations (all async)
+    # =========================================================================
 
-    def set_file(
+    async def set_file(
         self,
         key: K,
         source: Union[BinaryIO, bytes, str, Path],
         options: Optional[SetFileOptions] = None,
-    ) -> "Entry[K, FileValue[K]]":
-        """Upload a file and record it in the log.
+    ) -> Entry[K, FileValue[K]]:
+        """Upload a file and record it in the audit log.
 
-        Three-phase write protocol:
-        1. Upload file to S3 (compute hash during upload)
-        2. Write log entry to ImmuKV (commit point)
-        3. Write key object for fast lookup (best effort)
+        Phase 1 (async): Upload file to S3, compute hash during transfer.
+        Phase 2 (async): Write log entry to ImmuKV (commit point).
+        Phase 3 (async): Key object write handled by kv_client.set.
+
+        The S3 upload is cached for retry efficiency - if Phase 2 fails
+        due to optimistic locking conflict, Phase 1 result is reused.
 
         Args:
             key: User-supplied file key
@@ -206,153 +187,105 @@ class FileClient(Generic[K]):
             options: Optional settings (content_type, user_metadata)
 
         Returns:
-            The file entry
+            The file entry with metadata
 
         Raises:
-            MaxRetriesExceededError: If log write fails after retries
+            MaxRetriesExceededError: If log write fails after max retries
+            ConfigurationError: If S3 versioning is not enabled
         """
-        max_retries = 10
-        upload_result: Optional[UploadResult[K]] = None
+        data = self._read_source(source)
+        s3_key: FileS3Key[K] = file_s3_key_for_file(self._file_prefix, key)
+        content_type = options.content_type if options else "application/octet-stream"
 
-        for attempt in range(max_retries):
-            # Phase 1: Upload file only once (cache result for retries)
-            if upload_result is None:
-                upload_result = self._upload_file(key, source, options)
+        cached_upload: Optional[Tuple[FilePutObjectOutput[K], ContentHash[K]]] = None
 
-            try:
-                # Phase 2: Write log entry (may conflict on concurrent writes)
-                metadata = FileMetadata(
-                    s3_key=upload_result["s3_key"],
-                    s3_version_id=upload_result["s3_version_id"],
-                    content_hash=upload_result["content_hash"],
-                    content_length=upload_result["content_length"],
-                    content_type=upload_result["content_type"],
-                    user_metadata=upload_result["user_metadata"],
+        for attempt in range(10):
+            if cached_upload is None:
+                response, content_hash = await self._async_s3.put_object_with_hash(
+                    bucket=self._file_bucket,
+                    key=s3_key,
+                    body=data,
+                    content_type=content_type,
+                    metadata=options.user_metadata if options else None,
+                    sse_kms_key_id=self._kms_key_id,
+                    server_side_encryption="aws:kms" if self._kms_key_id else None,
+                )
+                cached_upload = (response, content_hash)
+            else:
+                response, content_hash = cached_upload
+
+            version_id = response.get("version_id")
+            if version_id is None:
+                raise ConfigurationError(
+                    "S3 did not return version ID - versioning may be disabled"
                 )
 
-                # Use kv_client.set() which handles log write with optimistic locking
-                entry = self._kv_client.set(key, metadata)  # type: ignore[arg-type]
+            metadata: FileMetadata[K] = FileMetadata(
+                s3_key=s3_key,
+                s3_version_id=FileVersionId(str(version_id)),
+                content_hash=content_hash,
+                content_length=len(data),
+                content_type=content_type if content_type else "application/octet-stream",
+                user_metadata=options.user_metadata if options else None,
+            )
 
-                # Phase 3: Key object write is handled by kv_client.set() internally
-
+            try:
+                entry = await self._kv_client.set(key, metadata)
                 return entry
-
             except ClientError as e:  # type: ignore[misc]
-                # Retry on precondition failure (concurrent write conflict)
-                error_response: dict[str, object] = e.response  # type: ignore[misc,assignment]
-                error_dict = error_response.get("Error", {})
-                error_code = error_dict.get("Code", "") if isinstance(error_dict, dict) else ""  # type: ignore[misc]
-                response_meta = error_response.get("ResponseMetadata", {})
-                http_status: object = response_meta.get("HTTPStatusCode") if isinstance(response_meta, dict) else None  # type: ignore[misc]
-                if error_code == "PreconditionFailed" or http_status == 412:  # type: ignore[misc]
-                    # DO NOT re-upload - reuse cached upload_result
+                # Check for precondition failure (optimistic locking conflict)
+                if get_error_code(e) == "PreconditionFailed":  # type: ignore[misc]
                     continue
                 raise
 
-        raise MaxRetriesExceededError(
-            f"Failed to write file entry for '{key}' after {max_retries} retries"
-        )
+        raise MaxRetriesExceededError(f"Failed to commit after 10 attempts: {key}")
 
-    def get_file(self, key: K, options: Optional[GetFileOptions[K]] = None) -> FileDownload[K]:
-        """Get a file by key.
-
-        Returns the file content as an iterator along with metadata.
-        Supports historical access via version_id option.
-
-        Args:
-            key: File key
-            options: Optional settings (version_id for historical access)
-
-        Returns:
-            FileDownload with entry and stream iterator
-
-        Raises:
-            FileNotFoundError: If key does not exist
-            FileDeletedError: If file has been deleted
-        """
-        # Get entry from log
-        entry: Entry[K, FileValue[K]]
-
-        if options and options.version_id is not None:
-            # Historical access via specific version
-            history, _ = self._kv_client.history(key, options.version_id, 1)
-            if len(history) == 0:
-                raise FileNotFoundError(f"File '{key}' version '{options.version_id}' not found")
-            entry = history[0]
-        else:
-            # Current version
-            try:
-                entry = self._kv_client.get(key)
-            except Exception as e:
-                if "KeyNotFoundError" in str(type(e)):
-                    # Fallback: check log history (key object might be missing)
-                    history, _ = self._kv_client.history(key, None, 1)
-                    if len(history) == 0:
-                        raise FileNotFoundError(f"File '{key}' not found") from e
-                    entry = history[0]
-                else:
-                    raise
-
-        # Check if deleted
-        if is_deleted_file(entry.value):
-            raise FileDeletedError(f"File '{key}' has been deleted")
-
-        # Download file from S3
-        file_value: FileMetadata[K] = entry.value  # type: ignore[assignment]
-        response = self._file_s3.get_object(
-            bucket=self._file_bucket,
-            key=file_value.s3_key,
-            version_id=file_value.s3_version_id,
-        )
-
-        return FileDownload(
-            entry=entry,
-            stream=response["body"],
-        )
-
-    def get_file_to_path(
+    async def get_file(
         self,
         key: K,
-        dest_path: Union[str, Path],
         options: Optional[GetFileOptions[K]] = None,
-    ) -> "Entry[K, FileValue[K]]":
-        """Get a file and write it to a local path.
+    ) -> FileDownload[K]:
+        """Get a file by key.
+
+        Returns an async iterator for streaming file content along with metadata.
 
         Args:
             key: File key
-            dest_path: Destination file path
-            options: Optional settings (version_id for historical access)
+            options: Optional version_id for historical access
 
         Returns:
-            The file entry
+            FileDownload with entry metadata and async stream iterator
 
         Raises:
-            FileNotFoundError: If key does not exist
+            FileKeyNotFoundError: If key does not exist
             FileDeletedError: If file has been deleted
         """
-        download = self.get_file(key, options)
+        entry = await self._get_entry(key, options)
 
-        # Ensure directory exists
-        path = Path(dest_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if is_deleted_file(entry.value):
+            raise FileDeletedError(f"File has been deleted: {key}")
 
-        # Write stream to file
-        with path.open("wb") as f:
-            for chunk in download.stream:
-                f.write(chunk)
+        file_value: FileMetadata[K] = entry.value  # type: ignore[assignment]
 
-        return download.entry
+        async def stream() -> AsyncIterator[bytes]:
+            response = await self._async_s3.get_object(
+                bucket=self._file_bucket,
+                key=file_value.s3_key,
+                version_id=file_value.s3_version_id,
+            )
+            body: AsyncIterator[bytes] = response["body"]
+            # body is already an async iterator
+            async for chunk in body:
+                yield chunk
 
-    def delete_file(self, key: K) -> "Entry[K, FileValue[K]]":
+        return FileDownload(entry=entry, stream=stream())
+
+    async def delete_file(self, key: K) -> Entry[K, FileValue[K]]:
         """Delete a file.
 
-        Three-phase delete protocol:
-        1. Delete S3 object (creates delete marker in versioned bucket)
-        2. Write tombstone entry to log with delete marker's version ID
-        3. Update key object (handled by kv_client.set)
-
-        The original file content remains accessible via S3 versioning for audit purposes.
-        Use history() to see deleted files and their original content hashes.
+        Phase 1 (async): Delete S3 object (creates delete marker).
+        Phase 2 (async): Write tombstone entry to log.
+        Phase 3 (async): Key object handled by kv_client.set.
 
         Args:
             key: File key to delete
@@ -361,235 +294,179 @@ class FileClient(Generic[K]):
             The tombstone entry
 
         Raises:
-            FileNotFoundError: If key does not exist
+            FileKeyNotFoundError: If key does not exist
             FileDeletedError: If file is already deleted
-            ConfigurationError: If S3 delete does not return a version ID
         """
-        # Get current entry to verify it exists and is not deleted
         try:
-            current_entry = self._kv_client.get(key)
-        except Exception as e:
-            if "KeyNotFoundError" in str(type(e)):
-                raise FileNotFoundError(f"File '{key}' not found") from e
-            raise
+            entry = await self._kv_client.get(key)
+        except KeyNotFoundError as e:
+            raise FileKeyNotFoundError(f"File not found: {key}") from e
 
-        if is_deleted_file(current_entry.value):
-            raise FileDeletedError(f"File '{key}' is already deleted")
+        if entry is None:
+            raise FileKeyNotFoundError(f"File not found: {key}")
 
-        current_value: FileMetadata[K] = current_entry.value  # type: ignore[assignment]
+        if is_deleted_file(entry.value):
+            raise FileDeletedError(f"File already deleted: {key}")
 
-        # Phase 1: Delete S3 object (creates delete marker in versioned bucket)
-        delete_response = self._file_s3.delete_object(
+        file_value: FileMetadata[K] = entry.value  # type: ignore[assignment]
+
+        # Phase 1: S3 delete
+        delete_response = await self._async_s3.delete_object(
             bucket=self._file_bucket,
-            key=current_value.s3_key,
+            key=file_value.s3_key,
         )
 
-        delete_marker_version_id: Optional[FileVersionId[K]] = (
-            FileDeleteObjectOutputs.delete_marker_version_id(delete_response)
-        )  # type: ignore[misc]
+        delete_marker_version_id = delete_response.get("version_id")
         if delete_marker_version_id is None:
-            raise ConfigurationError(
-                f"S3 DeleteObject response missing VersionId - ensure versioning is "
-                f"enabled on bucket '{self._file_bucket}'"
-            )
+            raise ConfigurationError("S3 delete did not return version ID")
 
-        # Phase 2: Write tombstone entry with delete marker's version ID
+        # Phase 2: Tombstone write
         tombstone: DeletedFileMetadata[K] = DeletedFileMetadata(
-            s3_key=current_value.s3_key,
-            deleted_version_id=delete_marker_version_id,  # type: ignore[misc]
+            s3_key=file_value.s3_key,
+            deleted_version_id=FileVersionId(str(delete_marker_version_id)),
             deleted=True,
-        )  # type: ignore[misc]
+        )
 
-        # Phase 3: Key object update is handled by kv_client.set internally
-        return self._kv_client.set(key, tombstone)  # type: ignore[arg-type,misc]
+        return await self._kv_client.set(key, tombstone)
 
-    def history(
+    async def verify_file(self, entry: Entry[K, FileValue[K]]) -> bool:
+        """Verify file integrity.
+
+        Downloads the file and verifies content_hash matches.
+
+        Args:
+            entry: The file entry to verify
+
+        Returns:
+            True if computed hash matches stored hash
+        """
+        if not self._kv_client.verify(entry):
+            return False
+
+        if is_deleted_file(entry.value):
+            return True  # Tombstones have no content to verify
+
+        file_value: FileMetadata[K] = entry.value  # type: ignore[assignment]
+
+        content, actual_hash = await self._async_s3.get_object_with_hash(
+            bucket=self._file_bucket,
+            key=file_value.s3_key,
+            version_id=file_value.s3_version_id,
+        )
+
+        return str(actual_hash) == str(file_value.content_hash)
+
+    # =========================================================================
+    # Metadata Operations (all async - delegate to kv_client)
+    # =========================================================================
+
+    async def history(
         self,
         key: K,
         before_version_id: Optional[KeyVersionId[K]] = None,
         limit: Optional[int] = None,
-    ) -> Tuple[List["Entry[K, FileValue[K]]"], Optional[KeyVersionId[K]]]:
+    ) -> Tuple[List[Entry[K, FileValue[K]]], Optional[KeyVersionId[K]]]:
         """Get history of a file key.
-
-        Returns all entries including deletions, newest first.
 
         Args:
             key: File key
-            before_version_id: Pagination cursor (pass last version_id from previous result)
+            before_version_id: Pagination cursor
             limit: Maximum entries to return
 
         Returns:
             Tuple of (entries, next_cursor)
         """
-        return self._kv_client.history(key, before_version_id, limit)
+        return await self._kv_client.history(key, before_version_id, limit)
 
-    def list_files(self, after_key: Optional[K] = None, limit: Optional[int] = None) -> List[K]:
+    async def list_files(
+        self,
+        after_key: Optional[K] = None,
+        limit: Optional[int] = None,
+    ) -> List[K]:
         """List file keys.
-
-        Returns keys in lexicographic order.
-        Pass the last key from the previous result as `after_key` for pagination.
 
         Args:
             after_key: Pagination cursor
             limit: Maximum keys to return
 
         Returns:
-            List of keys
+            List of file keys
         """
-        return self._kv_client.list_keys(after_key, limit)
+        return await self._kv_client.list_keys(after_key, limit)
 
-    def verify_file(self, entry: "Entry[K, FileValue[K]]") -> bool:
-        """Verify file integrity by downloading and checking content hash.
+    # =========================================================================
+    # Properties
+    # =========================================================================
 
-        For active files: downloads file and verifies content_hash.
-        For tombstones: verifies entry hash only (no content to verify).
+    @property
+    def kv_client(self) -> ImmuKVClient[K, FileValue[K]]:
+        """The underlying ImmuKV client."""
+        return self._kv_client
 
-        Args:
-            entry: File entry to verify
+    # =========================================================================
+    # Context Manager
+    # =========================================================================
 
-        Returns:
-            True if integrity check passes
-        """
-        # First verify entry hash (metadata integrity)
-        entry_valid = self._kv_client.verify(entry)  # type: ignore[misc]
-        if not entry_valid:
-            return False
-
-        # For tombstones, entry hash verification is sufficient
-        if is_deleted_file(entry.value):  # type: ignore[misc]
-            return True
-
-        # For active files, download and verify content hash
-        file_value: FileMetadata[K] = entry.value  # type: ignore[assignment,misc]
-
-        try:
-            response = self._file_s3.get_object(
-                bucket=self._file_bucket,
-                key=file_value.s3_key,
-                version_id=file_value.s3_version_id,
-            )
-
-            # Stream to buffer and compute hash
-            chunks: list[bytes] = []
-            for chunk in response["body"]:
-                chunks.append(chunk)
-            buffer = b"".join(chunks)
-
-            actual_hash: ContentHash[K] = compute_hash_from_bytes(buffer)  # type: ignore[misc]
-            return str(actual_hash) == str(file_value.content_hash)
-
-        except ClientError as e:  # type: ignore[misc]
-            error_response: dict[str, object] = e.response  # type: ignore[misc,assignment]
-            error_dict = error_response.get("Error", {})
-            error_code = error_dict.get("Code", "") if isinstance(error_dict, dict) else ""
-            if error_code in ["NoSuchKey", "NoSuchVersion"]:
-                # File missing from S3
-                return False
-            raise
-
-    def close(self) -> None:
-        """Close the client and cleanup resources.
-
-        Only destroys S3 client if it was created by this FileClient.
-        The underlying kv_client is not closed - caller is responsible for that.
-        """
-        if self._owns_s3_client:
-            # boto3 clients don't have a close method, but we can clear references
-            pass
-
-    def __enter__(self) -> "FileClient[K]":
-        """Context manager entry."""
+    async def __aenter__(self) -> "FileClient[K]":
         return self
 
-    def __exit__(
-        self,
-        exc_type: Optional[type],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[object],
-    ) -> None:
-        """Context manager exit."""
-        self.close()
+    async def __aexit__(self, *args: object) -> None:
+        pass  # Session owned by kv_client
 
-    # Private helper methods
+    # =========================================================================
+    # Internal Helpers
+    # =========================================================================
 
-    def _upload_file(
+    async def _get_entry(
         self,
         key: K,
-        source: Union[BinaryIO, bytes, str, Path],
-        options: Optional[SetFileOptions],
-    ) -> UploadResult[K]:
-        """Upload file to S3 and compute hash."""
-        s3_key: FileS3Key[K] = file_s3_key_for_file(self._file_prefix, key)
-        content_type = options.content_type if options else None
-        if content_type is None:
-            content_type = "application/octet-stream"
+        options: Optional[GetFileOptions[K]],
+    ) -> Entry[K, FileValue[K]]:
+        """Get entry, optionally by version."""
+        if options and options.version_id:
+            # Historical access via specific version
+            history, _ = await self._kv_client.history(key, options.version_id, 1)
+            if len(history) == 0:
+                raise FileKeyNotFoundError(f"File '{key}' version '{options.version_id}' not found")
+            return history[0]
 
-        # Prepare content and compute hash
-        buffer: bytes
-        content_hash: ContentHash[K]
-        content_length: int
+        try:
+            entry = await self._kv_client.get(key)
+        except KeyNotFoundError as e:
+            raise FileKeyNotFoundError(f"File not found: {key}") from e
+        if entry is None:
+            raise FileKeyNotFoundError(f"File not found: {key}")
+        return entry
 
+    async def _validate_bucket(self) -> None:
+        """Validate bucket access and versioning."""
+        versioning = await self._async_s3.get_bucket_versioning(self._file_bucket)
+        if versioning.get("Status") != "Enabled":
+            raise ConfigurationError(f"Bucket versioning not enabled: {self._file_bucket}")
+
+    def _read_source(self, source: Union[BinaryIO, bytes, str, Path]) -> bytes:
+        """Read source into bytes."""
         if isinstance(source, bytes):
-            buffer = source
-            content_hash = compute_hash_from_bytes(source)
-            content_length = len(source)
-        elif isinstance(source, (str, Path)):
+            return source
+        if isinstance(source, (str, Path)):
             path = Path(source)
             if path.exists():
-                content_hash, buffer, content_length = compute_hash_from_path(path)
-            else:
-                # Treat as string content (for str input only)
-                if isinstance(source, str):
-                    buffer = source.encode("utf-8")
-                    content_hash = compute_hash_from_bytes(buffer)
-                    content_length = len(buffer)
-                else:
-                    raise FileNotFoundError(f"File not found: {source}")
-        else:
-            # BinaryIO - read and hash
-            content_hash, buffer, content_length = compute_hash_from_file(source)
+                with open(path, "rb") as f:
+                    return f.read()
+            # Treat as string content (for str input only)
+            if isinstance(source, str):
+                return source.encode("utf-8")
+            raise FileNotFoundError(f"File not found: {source}")
+        return source.read()
 
-        # Upload to S3
-        put_response = self._file_s3.put_object(
-            bucket=self._file_bucket,
-            key=s3_key,
-            body=buffer,
-            content_type=content_type,
-            metadata=options.user_metadata if options else None,
-            sse_kms_key_id=self._kms_key_id,
-            server_side_encryption="aws:kms" if self._kms_key_id else None,
-        )
+    def _make_s3_key(self, key: K) -> str:
+        """Generate S3 key path from user key."""
+        return f"{self._file_prefix}{key}"
 
-        s3_version_id: Optional[FileVersionId[K]] = FilePutObjectOutputs.file_version_id(
-            put_response
-        )  # type: ignore[misc]
-        if s3_version_id is None:
-            raise ConfigurationError(
-                f"S3 PutObject response missing VersionId - ensure versioning is enabled "
-                f"on bucket '{self._file_bucket}'"
-            )
 
-        return {
-            "s3_key": s3_key,
-            "s3_version_id": s3_version_id,
-            "content_hash": content_hash,
-            "content_length": content_length,
-            "content_type": content_type,
-            "user_metadata": options.user_metadata if options else None,
-        }
-
-    def _validate_versioning(self) -> None:
-        """Validate that file bucket has versioning enabled."""
-        response = self._file_s3.get_bucket_versioning(self._file_bucket)
-
-        status = response.get("Status")
-        if status != "Enabled":
-            raise ConfigurationError(
-                f"File bucket '{self._file_bucket}' must have versioning enabled. "
-                f"Current: {status or 'Disabled'}. "
-                f"Enable with: aws s3api put-bucket-versioning --bucket {self._file_bucket} "
-                f"--versioning-configuration Status=Enabled"
-            )
+# =============================================================================
+# Codec functions for file values
+# =============================================================================
 
 
 def file_value_decoder(json: JSONValue) -> FileValue[K]:
@@ -658,24 +535,29 @@ def file_value_encoder(value: FileValue[K]) -> JSONValue:
     return result
 
 
-def create_file_client(
+async def create_file_client(
     kv_client: ImmuKVClient[K, object],
     config: Optional[FileStorageConfig] = None,
-) -> FileClient[K]:
+) -> AsyncIterator[FileClient[K]]:
     """Create a FileClient from an ImmuKV client and configuration.
 
-    This is the recommended way to create a FileClient.
+    This is an async context manager factory.
     Validates bucket access and versioning status.
 
     Args:
         kv_client: ImmuKV client (will be used with file codecs)
         config: Optional file storage configuration
 
-    Returns:
+    Yields:
         Validated FileClient
+
+    Example:
+        async with create_file_client(kv, config) as files:
+            await files.set_file("key", data)
     """
     # Create typed client with file codecs
     typed_client: ImmuKVClient[K, FileValue[K]] = kv_client.with_codec(
         file_value_decoder, file_value_encoder
     )
-    return FileClient.create(typed_client, config)
+    async with FileClient.create(typed_client, config) as client:
+        yield client

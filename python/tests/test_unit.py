@@ -14,8 +14,7 @@ from immukv._internal.types import (
     sequence_from_json,
     timestamp_from_json,
 )
-from immukv.types import Config, Hash, S3Overrides, Sequence, TimestampMs
-
+from immukv.types import Config, Hash, S3Overrides, TimestampMs
 
 # --- Hash Computation Tests ---
 

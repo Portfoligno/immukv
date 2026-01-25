@@ -21,15 +21,20 @@ classifiers = [
 ]
 dependencies = [
     "immukv @ file:../../../python",
-    "boto3>=1.28.0",
+    "aiobotocore>=2.5.0",
 ]
 
 [project.optional-dependencies]
+types = [
+    "types-aiobotocore-s3>=2.5.0",
+]
 dev = [
     "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
+    "pytest-asyncio>=0.23",
     "mypy>=1.5.0",
-    "boto3-stubs[s3]>=1.28.0",
+    "types-aiobotocore-s3>=2.5.0",
+    "moto[s3]>=4.0",
+    "aiofiles>=23.0",
     "black>=23.7.0",
     "ruff>=0.0.286",
 ]
@@ -47,6 +52,10 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.mypy]
 python_version = "3.11"

@@ -1,4 +1,4 @@
-"""ImmuKV File Storage - File storage with audit logging using ImmuKV."""
+"""ImmuKV File Storage - Async-only file storage with audit logging using ImmuKV."""
 
 from immukv_files.client import (
     FileClient,
@@ -26,8 +26,9 @@ from immukv_files.types import (
     # Type guards
     is_deleted_file,
     is_active_file,
-    # Error types
-    FileNotFoundError,
+    # Error types (FileKeyNotFoundError is the new name)
+    FileKeyNotFoundError,
+    FileNotFoundError,  # Backwards compatibility alias
     FileDeletedError,
     IntegrityError,
     FileOrphanedError,
@@ -64,7 +65,8 @@ __all__ = [
     "is_deleted_file",
     "is_active_file",
     # Error types
-    "FileNotFoundError",
+    "FileKeyNotFoundError",
+    "FileNotFoundError",  # Backwards compatibility alias
     "FileDeletedError",
     "IntegrityError",
     "FileOrphanedError",

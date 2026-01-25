@@ -2,7 +2,7 @@
 
 import hashlib
 from pathlib import Path
-from typing import BinaryIO, Iterator, Tuple, TypeVar, Union
+from typing import AsyncIterator, BinaryIO, Iterator, Tuple, TypeVar, Union
 
 from immukv_files.types import ContentHash
 from immukv_files._internal.types import content_hash_from_digest
@@ -100,7 +100,7 @@ def verify_bytes_hash(data: bytes, expected_hash: ContentHash[K]) -> bool:
     Returns:
         True if hash matches
     """
-    actual_hash: ContentHash[str] = compute_hash_from_bytes(data)  # type: ignore[misc]
+    actual_hash: ContentHash[str] = compute_hash_from_bytes(data)
     return str(actual_hash) == str(expected_hash)
 
 
@@ -115,5 +115,51 @@ def verify_iterator_hash(data: Iterator[bytes], expected_hash: ContentHash[K]) -
         True if hash matches
     """
     actual_hash: ContentHash[str]
-    actual_hash, _, _ = compute_hash_from_iterator(data)  # type: ignore[misc]
+    actual_hash, _, _ = compute_hash_from_iterator(data)
+    return str(actual_hash) == str(expected_hash)
+
+
+# =============================================================================
+# Async hash functions
+# =============================================================================
+
+
+async def compute_hash_from_async_iterator(
+    data: AsyncIterator[bytes],
+) -> Tuple[ContentHash[str], bytes, int]:
+    """Compute SHA-256 hash from async iterator.
+
+    Consumes the iterator and buffers content.
+
+    Args:
+        data: Async iterator of byte chunks
+
+    Returns:
+        Tuple of (content_hash, buffer, content_length)
+    """
+    hash_obj = hashlib.sha256()
+    chunks: list[bytes] = []
+
+    async for chunk in data:
+        hash_obj.update(chunk)
+        chunks.append(chunk)
+
+    buffer = b"".join(chunks)
+    return content_hash_from_digest(hash_obj.hexdigest()), buffer, len(buffer)
+
+
+async def verify_async_iterator_hash(
+    data: AsyncIterator[bytes], expected_hash: ContentHash[K]
+) -> bool:
+    """Verify that async iterator content matches an expected content hash.
+
+    Args:
+        data: Async iterator of bytes to verify
+        expected_hash: Expected ContentHash
+
+    Returns:
+        True if hash matches
+    """
+    actual_hash: ContentHash[str]
+    actual_hash, _, _ = await compute_hash_from_async_iterator(data)
     return str(actual_hash) == str(expected_hash)

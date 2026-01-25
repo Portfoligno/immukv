@@ -1,4 +1,4 @@
-"""Integration tests for ImmuKV client using MinIO.
+"""Integration tests for ImmuKV async client using MinIO.
 
 These tests require MinIO running and test actual S3 operations.
 Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:9000 pytest
@@ -6,17 +6,18 @@ Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:9000 
 
 import os
 import uuid
-from typing import Generator
+from collections.abc import Generator
+from typing import AsyncGenerator
 
 import boto3
 import pytest
+import pytest_asyncio
 from mypy_boto3_s3.client import S3Client
 
-from immukv import Config, ImmuKVClient
-from immukv._internal.s3_client import BrandedS3Client
+from immukv import Config, Entry, ImmuKVClient
+from immukv._internal.async_s3_client import AsyncBrandedS3Client, create_async_s3_client
 from immukv.json_helpers import JSONValue
 from immukv.types import S3Credentials, S3Overrides
-
 
 # Skip if not in integration test mode
 pytestmark = pytest.mark.skipif(
@@ -51,10 +52,29 @@ def raw_s3() -> S3Client:
     )
 
 
-@pytest.fixture(scope="session")  # type: ignore[misc]
-def s3_client(raw_s3: S3Client) -> BrandedS3Client:
-    """Create branded S3 client for type-safe operations."""
-    return BrandedS3Client(raw_s3)
+@pytest_asyncio.fixture(scope="session")  # type: ignore[misc]
+async def s3_client(raw_s3: S3Client) -> AsyncGenerator[AsyncBrandedS3Client[str], None]:
+    """Create async branded S3 client for type-safe operations."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:4566")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    config = Config(
+        s3_bucket="test-bucket",  # Not used for client creation
+        s3_region="us-east-1",
+        s3_prefix="test/",
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=S3Credentials(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+            ),
+            force_path_style=True,
+        ),
+    )
+
+    async with create_async_s3_client(config) as client:
+        yield client
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -93,8 +113,8 @@ def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
         print(f"Warning: Cleanup failed for bucket {bucket_name}: {e}")
 
 
-@pytest.fixture  # type: ignore[misc]
-def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
+@pytest_asyncio.fixture  # type: ignore[misc]
+async def client(s3_bucket: str) -> AsyncGenerator[ImmuKVClient[str, object], None]:
     """Create ImmuKV client connected to MinIO."""
     endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:9000")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
@@ -115,17 +135,16 @@ def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
         ),
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
-        config, identity_decoder, identity_encoder
-    )
-    with client_instance as client:
-        yield client
+    client_instance: ImmuKVClient[str, object]
+    async with ImmuKVClient.create(config, identity_decoder, identity_encoder) as client_instance:
+        yield client_instance
 
 
-def test_set_and_get_single_entry(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_set_and_get_single_entry(client: ImmuKVClient[str, object]) -> None:
     """Test basic set and get operations."""
     # Set a value
-    entry = client.set("key1", {"data": "value1"})
+    entry = await client.set("key1", {"data": "value1"})
 
     # Verify entry structure
     assert entry.key == "key1"
@@ -137,7 +156,7 @@ def test_set_and_get_single_entry(client: ImmuKVClient[str, object]) -> None:
     assert entry.previous_version_id is None
 
     # Get the value back
-    retrieved = client.get("key1")
+    retrieved = await client.get("key1")
 
     assert retrieved.key == entry.key
     assert retrieved.value == entry.value
@@ -145,12 +164,13 @@ def test_set_and_get_single_entry(client: ImmuKVClient[str, object]) -> None:
     assert retrieved.hash == entry.hash
 
 
-def test_set_multiple_entries_same_key(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_set_multiple_entries_same_key(client: ImmuKVClient[str, object]) -> None:
     """Test multiple writes to the same key."""
     # Write three values to the same key
-    entry1 = client.set("sensor-01", {"temp": 20.5})
-    entry2 = client.set("sensor-01", {"temp": 21.0})
-    entry3 = client.set("sensor-01", {"temp": 19.8})
+    entry1 = await client.set("sensor-01", {"temp": 20.5})
+    entry2 = await client.set("sensor-01", {"temp": 21.0})
+    entry3 = await client.set("sensor-01", {"temp": 19.8})
 
     # Verify sequence numbers are contiguous
     assert entry1.sequence == 0
@@ -163,16 +183,17 @@ def test_set_multiple_entries_same_key(client: ImmuKVClient[str, object]) -> Non
     assert entry3.previous_hash == entry2.hash
 
     # Get should return latest value
-    latest = client.get("sensor-01")
+    latest = await client.get("sensor-01")
     assert latest.value == {"temp": 19.8}
     assert latest.sequence == 2
 
 
-def test_set_multiple_keys(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_set_multiple_keys(client: ImmuKVClient[str, object]) -> None:
     """Test writing to multiple different keys."""
-    entry1 = client.set("key-a", {"value": "a"})
-    entry2 = client.set("key-b", {"value": "b"})
-    entry3 = client.set("key-c", {"value": "c"})
+    entry1 = await client.set("key-a", {"value": "a"})
+    entry2 = await client.set("key-b", {"value": "b"})
+    entry3 = await client.set("key-c", {"value": "c"})
 
     # All entries should be in the log with contiguous sequences
     assert entry1.sequence == 0
@@ -180,20 +201,21 @@ def test_set_multiple_keys(client: ImmuKVClient[str, object]) -> None:
     assert entry3.sequence == 2
 
     # Each key should retrieve its own value
-    assert client.get("key-a").value == {"value": "a"}
-    assert client.get("key-b").value == {"value": "b"}
-    assert client.get("key-c").value == {"value": "c"}
+    assert (await client.get("key-a")).value == {"value": "a"}
+    assert (await client.get("key-b")).value == {"value": "b"}
+    assert (await client.get("key-c")).value == {"value": "c"}
 
 
-def test_history_single_key(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_history_single_key(client: ImmuKVClient[str, object]) -> None:
     """Test retrieving history for a single key."""
     # Write multiple versions
-    client.set("metric", {"count": 1})
-    client.set("metric", {"count": 2})
-    client.set("metric", {"count": 3})
+    await client.set("metric", {"count": 1})
+    await client.set("metric", {"count": 2})
+    await client.set("metric", {"count": 3})
 
     # Get full history
-    entries, oldest_version = client.history("metric", None, None)
+    entries, oldest_version = await client.history("metric", None, None)
 
     # Should return all 3 entries in descending order (newest first)
     assert len(entries) == 3
@@ -207,14 +229,15 @@ def test_history_single_key(client: ImmuKVClient[str, object]) -> None:
     assert entries[2].sequence == 0
 
 
-def test_history_with_limit(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_history_with_limit(client: ImmuKVClient[str, object]) -> None:
     """Test history retrieval with limit."""
     # Write 5 versions
     for i in range(5):
-        client.set("counter", {"value": i})
+        await client.set("counter", {"value": i})
 
     # Get only first 3
-    entries, oldest_version = client.history("counter", None, 3)
+    entries, oldest_version = await client.history("counter", None, 3)
 
     assert len(entries) == 3
     assert entries[0].value == {"value": 4}  # Newest
@@ -222,17 +245,18 @@ def test_history_with_limit(client: ImmuKVClient[str, object]) -> None:
     assert entries[2].value == {"value": 2}
 
 
-def test_history_mixed_keys(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_history_mixed_keys(client: ImmuKVClient[str, object]) -> None:
     """Test that history only returns entries for requested key."""
     # Mix writes to different keys
-    client.set("key-x", {"data": "x1"})
-    client.set("key-y", {"data": "y1"})
-    client.set("key-x", {"data": "x2"})
-    client.set("key-y", {"data": "y2"})
-    client.set("key-x", {"data": "x3"})
+    await client.set("key-x", {"data": "x1"})
+    await client.set("key-y", {"data": "y1"})
+    await client.set("key-x", {"data": "x2"})
+    await client.set("key-y", {"data": "y2"})
+    await client.set("key-x", {"data": "x3"})
 
     # Get history for key-x
-    entries, _ = client.history("key-x", None, None)
+    entries, _ = await client.history("key-x", None, None)
 
     # Should only have 3 entries for key-x
     assert len(entries) == 3
@@ -242,15 +266,16 @@ def test_history_mixed_keys(client: ImmuKVClient[str, object]) -> None:
     assert entries[2].value == {"data": "x1"}
 
 
-def test_log_entries(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_log_entries(client: ImmuKVClient[str, object]) -> None:
     """Test retrieving entries from global log."""
     # Write to multiple keys
-    client.set("k1", {"v": 1})
-    client.set("k2", {"v": 2})
-    client.set("k1", {"v": 3})
+    await client.set("k1", {"v": 1})
+    await client.set("k2", {"v": 2})
+    await client.set("k1", {"v": 3})
 
     # Get all log entries
-    entries = client.log_entries(None, None)
+    entries = await client.log_entries(None, None)
 
     # Should have 3 entries in descending order (newest first)
     assert len(entries) == 3
@@ -267,14 +292,15 @@ def test_log_entries(client: ImmuKVClient[str, object]) -> None:
     assert entries[2].sequence == 0
 
 
-def test_log_entries_with_limit(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_log_entries_with_limit(client: ImmuKVClient[str, object]) -> None:
     """Test log retrieval with limit."""
     # Write 5 entries
     for i in range(5):
-        client.set(f"key-{i}", {"index": i})
+        await client.set(f"key-{i}", {"index": i})
 
     # Get only 3 newest
-    entries = client.log_entries(None, 3)
+    entries = await client.log_entries(None, 3)
 
     assert len(entries) == 3
     assert entries[0].sequence == 4
@@ -282,49 +308,53 @@ def test_log_entries_with_limit(client: ImmuKVClient[str, object]) -> None:
     assert entries[2].sequence == 2
 
 
-def test_list_keys(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_list_keys(client: ImmuKVClient[str, object]) -> None:
     """Test listing all keys."""
     # Write to multiple keys (not in alphabetical order)
-    client.set("zebra", {"animal": "z"})
-    client.set("apple", {"fruit": "a"})
-    client.set("banana", {"fruit": "b"})
+    await client.set("zebra", {"animal": "z"})
+    await client.set("apple", {"fruit": "a"})
+    await client.set("banana", {"fruit": "b"})
 
     # List all keys
-    keys = client.list_keys(None, None)
+    keys = await client.list_keys(None, None)
 
     # Should return in lexicographic order
     assert len(keys) == 3
     assert keys == ["apple", "banana", "zebra"]
 
 
-def test_list_keys_with_pagination(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_list_keys_with_pagination(client: ImmuKVClient[str, object]) -> None:
     """Test key listing with pagination."""
     # Create several keys
     for i in range(5):
-        client.set(f"key-{i:02d}", {"index": i})
+        await client.set(f"key-{i:02d}", {"index": i})
 
     # Get first 3 keys
-    keys = client.list_keys(None, 3)
+    keys = await client.list_keys(None, 3)
     assert len(keys) == 3
     assert keys == ["key-00", "key-01", "key-02"]
 
     # Get next batch after "key-01"
-    keys = client.list_keys("key-01", 2)
+    keys = await client.list_keys("key-01", 2)
     assert len(keys) == 2
     assert keys == ["key-02", "key-03"]
 
 
-def test_verify_single_entry(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_verify_single_entry(client: ImmuKVClient[str, object]) -> None:
     """Test verifying a single entry's hash."""
-    entry = client.set("test-key", {"field": "value"})
+    entry = await client.set("test-key", {"field": "value"})
 
     # Verify should pass for valid entry
     assert client.verify(entry) is True
 
 
-def test_verify_corrupted_entry(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_verify_corrupted_entry(client: ImmuKVClient[str, object]) -> None:
     """Test that verification fails for corrupted entry."""
-    entry = client.set("test-key", {"field": "value"})
+    entry = await client.set("test-key", {"field": "value"})
 
     # Corrupt the entry
     entry.value["field"] = "corrupted"  # type: ignore[index]
@@ -333,55 +363,60 @@ def test_verify_corrupted_entry(client: ImmuKVClient[str, object]) -> None:
     assert client.verify(entry) is False
 
 
-def test_verify_log_chain(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_verify_log_chain(client: ImmuKVClient[str, object]) -> None:
     """Test verifying the entire log hash chain."""
     # Write several entries
-    client.set("k1", {"v": 1})
-    client.set("k2", {"v": 2})
-    client.set("k3", {"v": 3})
+    await client.set("k1", {"v": 1})
+    await client.set("k2", {"v": 2})
+    await client.set("k3", {"v": 3})
 
     # Verify entire chain
-    assert client.verify_log_chain() is True
+    assert await client.verify_log_chain() is True
 
 
-def test_verify_log_chain_with_limit(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_verify_log_chain_with_limit(client: ImmuKVClient[str, object]) -> None:
     """Test verifying only recent entries in chain."""
     # Write several entries
     for i in range(10):
-        client.set(f"key-{i}", {"index": i})
+        await client.set(f"key-{i}", {"index": i})
 
     # Verify only last 5 entries
-    assert client.verify_log_chain(limit=5) is True
+    assert await client.verify_log_chain(limit=5) is True
 
 
-def test_get_nonexistent_key(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_get_nonexistent_key(client: ImmuKVClient[str, object]) -> None:
     """Test getting a key that doesn't exist."""
     from immukv.client import KeyNotFoundError
 
     # Write one key
-    client.set("existing-key", {"data": "value"})
+    await client.set("existing-key", {"data": "value"})
 
     # Try to get non-existent key
     with pytest.raises(KeyNotFoundError):
-        client.get("nonexistent-key")
+        await client.get("nonexistent-key")
 
 
-def test_history_nonexistent_key(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_history_nonexistent_key(client: ImmuKVClient[str, object]) -> None:
     """Test history for a key that was never written."""
     # Write to other keys
-    client.set("other-key", {"data": "value"})
+    await client.set("other-key", {"data": "value"})
 
     # History for non-existent key should return empty list
-    entries, oldest_version = client.history("nonexistent-key", None, None)
+    entries, oldest_version = await client.history("nonexistent-key", None, None)
     assert entries == []
     assert oldest_version is None
 
 
-def test_hash_chain_integrity(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_hash_chain_integrity(client: ImmuKVClient[str, object]) -> None:
     """Test that hash chain links entries correctly."""
-    entry1 = client.set("chain-test", {"step": 1})
-    entry2 = client.set("chain-test", {"step": 2})
-    entry3 = client.set("chain-test", {"step": 3})
+    entry1 = await client.set("chain-test", {"step": 1})
+    entry2 = await client.set("chain-test", {"step": 2})
+    entry3 = await client.set("chain-test", {"step": 3})
 
     # Verify chain links
     assert entry1.previous_hash == "sha256:genesis"
@@ -394,39 +429,42 @@ def test_hash_chain_integrity(client: ImmuKVClient[str, object]) -> None:
     assert entry1.hash != entry3.hash
 
 
-def test_sequence_numbers_contiguous(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_sequence_numbers_contiguous(client: ImmuKVClient[str, object]) -> None:
     """Test that sequence numbers are contiguous across different keys."""
     entries = []
 
     # Mix writes to different keys
-    entries.append(client.set("a", {"v": 1}))
-    entries.append(client.set("b", {"v": 2}))
-    entries.append(client.set("a", {"v": 3}))
-    entries.append(client.set("c", {"v": 4}))
-    entries.append(client.set("b", {"v": 5}))
+    entries.append(await client.set("a", {"v": 1}))
+    entries.append(await client.set("b", {"v": 2}))
+    entries.append(await client.set("a", {"v": 3}))
+    entries.append(await client.set("c", {"v": 4}))
+    entries.append(await client.set("b", {"v": 5}))
 
     # Verify all sequences are contiguous
     for i, entry in enumerate(entries):
         assert entry.sequence == i
 
 
-def test_get_log_version(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_get_log_version(client: ImmuKVClient[str, object]) -> None:
     """Test retrieving a specific log entry by version id."""
-    entry1 = client.set("versioned", {"data": "first"})
-    entry2 = client.set("versioned", {"data": "second"})
+    entry1 = await client.set("versioned", {"data": "first"})
+    await client.set("versioned", {"data": "second"})
 
     # Retrieve first entry by its version id
-    retrieved = client.get_log_version(entry1.version_id)
+    retrieved = await client.get_log_version(entry1.version_id)
 
     assert retrieved.sequence == entry1.sequence
     assert retrieved.value == {"data": "first"}
     assert retrieved.hash == entry1.hash
 
 
-def test_read_only_mode(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_read_only_mode(client: ImmuKVClient[str, object]) -> None:
     """Test that read-only mode works correctly."""
     # First write some data with normal client
-    client.set("readonly-test", {"value": "data"})
+    await client.set("readonly-test", {"value": "data"})
 
     # Create a read-only client
     config = Config(
@@ -437,17 +475,18 @@ def test_read_only_mode(client: ImmuKVClient[str, object]) -> None:
         overrides=client._config.overrides,
     )
 
-    ro_client: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
-    with ro_client:
+    ro_client: ImmuKVClient[str, object]
+    async with ImmuKVClient.create(config, identity_decoder, identity_encoder) as ro_client:
         # Read should work
-        entry = ro_client.get("readonly-test")
+        entry: Entry[str, object] = await ro_client.get("readonly-test")  # type: ignore[arg-type]
         assert entry.value == {"value": "data"}
 
         # Write should fail (implementation detail - may raise or handle differently)
         # For now, just verify read works
 
 
-def test_custom_endpoint_url_config(s3_bucket: str) -> None:
+@pytest.mark.asyncio
+async def test_custom_endpoint_url_config(s3_bucket: str) -> None:
     """Test that overrides can be specified for S3-compatible services."""
     # Config with overrides should be accepted
     config = Config(
@@ -458,19 +497,18 @@ def test_custom_endpoint_url_config(s3_bucket: str) -> None:
     )
 
     # Client creation should succeed
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
-        config, identity_decoder, identity_encoder
-    )
-
-    # Verify overrides are stored in config
-    assert client_instance._config.overrides is not None
-    assert client_instance._config.overrides.endpoint_url == "http://localhost:4566"
+    client_instance: ImmuKVClient[str, object]
+    async with ImmuKVClient.create(config, identity_decoder, identity_encoder) as client_instance:
+        # Verify overrides are stored in config
+        assert client_instance._config.overrides is not None
+        assert client_instance._config.overrides.endpoint_url == "http://localhost:4566"
 
     # Note: Actual operations would require MinIO/moto running at that endpoint.
     # This test verifies the config accepts and stores the overrides correctly.
 
 
-def test_default_overrides_is_none(s3_bucket: str) -> None:
+@pytest.mark.asyncio
+async def test_default_overrides_is_none(s3_bucket: str) -> None:
     """Test that overrides defaults to None for AWS S3."""
     # Config without overrides specified
     config = Config(
@@ -479,20 +517,21 @@ def test_default_overrides_is_none(s3_bucket: str) -> None:
         s3_prefix="test/",
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
-        config, identity_decoder, identity_encoder
-    )
-
-    # Should default to None (uses AWS S3)
-    assert client_instance._config.overrides is None
+    client_instance: ImmuKVClient[str, object]
+    async with ImmuKVClient.create(config, identity_decoder, identity_encoder) as client_instance:
+        # Should default to None (uses AWS S3)
+        assert client_instance._config.overrides is None
 
 
-def test_orphan_status_false_does_not_return_orphan(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_orphan_status_false_does_not_return_orphan(
+    client: ImmuKVClient[str, object],
+) -> None:
     """Test that is_orphaned=False does not trigger orphan fallback in get()."""
     from immukv.types import KeyNotFoundError
 
     # Create an entry and set it as orphan status with is_orphaned=False
-    entry = client.set("test-key", {"value": "orphan_data"})
+    entry = await client.set("test-key", {"value": "orphan_data"})
 
     # Set read-only mode so orphan fallback would be checked
     client._can_write = False
@@ -508,15 +547,16 @@ def test_orphan_status_false_does_not_return_orphan(client: ImmuKVClient[str, ob
     # Even though all other conditions match (read-only, key matches, entry exists)
     # is_orphaned=False should prevent the orphan fallback
     with pytest.raises(KeyNotFoundError, match="Key 'nonexistent-key' not found"):
-        client.get("nonexistent-key")
+        await client.get("nonexistent-key")
 
 
-def test_orphan_status_true_returns_orphan_in_readonly(
+@pytest.mark.asyncio
+async def test_orphan_status_true_returns_orphan_in_readonly(
     client: ImmuKVClient[str, object],
 ) -> None:
     """Test that is_orphaned=True correctly returns orphan entry in read-only mode."""
     # Create an entry
-    entry = client.set("existing-key", {"value": "test_data"})
+    entry = await client.set("existing-key", {"value": "test_data"})
 
     # Set read-only mode
     client._can_write = False
@@ -531,20 +571,21 @@ def test_orphan_status_true_returns_orphan_in_readonly(
 
     # get() on the orphaned key should return the orphan entry (not raise)
     # Even though the key object doesn't exist in S3
-    result = client.get("orphaned-key")
+    result = await client.get("orphaned-key")
 
     # Should return the cached orphan entry
     assert result.value == {"value": "test_data"}
     assert result.key == "existing-key"  # Original key from entry
 
 
-def test_orphan_status_false_does_not_prepend_in_history(
+@pytest.mark.asyncio
+async def test_orphan_status_false_does_not_prepend_in_history(
     client: ImmuKVClient[str, object],
 ) -> None:
     """Test that is_orphaned=False does not prepend orphan entry in history()."""
     # Create a key with history
-    client.set("test-key", {"value": "v1"})
-    entry2 = client.set("test-key", {"value": "v2"})
+    await client.set("test-key", {"value": "v1"})
+    entry2 = await client.set("test-key", {"value": "v2"})
 
     # Set orphan status with is_orphaned=False
     client._latest_orphan_status = {
@@ -555,7 +596,7 @@ def test_orphan_status_false_does_not_prepend_in_history(
     }
 
     # Get history - should NOT include orphan entry as first item
-    entries, _ = client.history("test-key", None, None)
+    entries, _ = await client.history("test-key", None, None)
 
     # Should have 2 entries (v2 and v1), NOT 3 (orphan + v2 + v1)
     assert len(entries) == 2
@@ -563,11 +604,12 @@ def test_orphan_status_false_does_not_prepend_in_history(
     assert entries[1].value == {"value": "v1"}
 
 
-def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object]) -> None:
     """Test that is_orphaned=True correctly prepends orphan entry in history()."""
     # Create a key with history
-    client.set("test-key", {"value": "v1"})
-    entry2 = client.set("test-key", {"value": "v2"})
+    await client.set("test-key", {"value": "v1"})
+    entry2 = await client.set("test-key", {"value": "v2"})
 
     # Set orphan status with is_orphaned=True
     client._latest_orphan_status = {
@@ -578,7 +620,7 @@ def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object
     }
 
     # Get history - should include orphan entry as first item
-    entries, _ = client.history("test-key", None, None)
+    entries, _ = await client.history("test-key", None, None)
 
     # Should have 3 entries: orphan (v2) + v2 + v1
     # Note: This creates a duplicate entry, which is the expected behavior
@@ -589,14 +631,15 @@ def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object
     assert entries[2].value == {"value": "v1"}
 
 
-def test_with_codec_creates_client_with_different_codec(
+@pytest.mark.asyncio
+async def test_with_codec_creates_client_with_different_codec(
     client: ImmuKVClient[str, object],
 ) -> None:
     """Test that with_codec creates a new client with different codec sharing S3 connection."""
     from typing import TypedDict, cast
 
     # Write with original client
-    client.set("shared-key", {"original": True})
+    await client.set("shared-key", {"original": True})
 
     # Create derived client with different codec
     class CustomValue(TypedDict):
@@ -613,18 +656,19 @@ def test_with_codec_creates_client_with_different_codec(
     )
 
     # Read with derived client - should decode with custom decoder
-    entry = derived_client.get("shared-key")
+    entry = await derived_client.get("shared-key")
     assert entry.value == {"transformed": True}
 
     # Write with derived client
-    derived_client.set("custom-key", {"transformed": False})
+    await derived_client.set("custom-key", {"transformed": False})
 
     # Read back with original client - should see the encoded value
-    original_entry = client.get("custom-key")
+    original_entry = await client.get("custom-key")
     assert original_entry.value == {"original": False}
 
 
-def test_with_codec_shares_s3_connection(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_with_codec_shares_s3_connection(client: ImmuKVClient[str, object]) -> None:
     """Test that derived client shares S3 connection with original."""
     derived_client: ImmuKVClient[str, object] = client.with_codec(
         identity_decoder, identity_encoder
@@ -635,7 +679,8 @@ def test_with_codec_shares_s3_connection(client: ImmuKVClient[str, object]) -> N
     assert derived_client._config is client._config
 
 
-def test_with_codec_has_independent_mutable_state(client: ImmuKVClient[str, object]) -> None:
+@pytest.mark.asyncio
+async def test_with_codec_has_independent_mutable_state(client: ImmuKVClient[str, object]) -> None:
     """Test that derived client has independent mutable state."""
     derived_client: ImmuKVClient[str, object] = client.with_codec(
         identity_decoder, identity_encoder

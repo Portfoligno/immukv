@@ -1,7 +1,5 @@
 """Tests for JSON helper functions."""
 
-import pytest
-
 from immukv._internal.json_helpers import dumps_canonical
 from immukv.json_helpers import JSONValue
 

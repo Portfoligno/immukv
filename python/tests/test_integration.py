@@ -7,20 +7,21 @@ testing specifications that cannot be adequately verified with mocks.
 import json
 import os
 import uuid
-from typing import Generator, cast
+from collections.abc import Generator
+from typing import AsyncGenerator, cast
 
 import boto3
 import pytest
+import pytest_asyncio
 from botocore.exceptions import ClientError
 from mypy_boto3_s3.client import S3Client
 
-from immukv import Config, ImmuKVClient
-from immukv._internal.s3_client import BrandedS3Client
+from immukv import Config, Entry, ImmuKVClient
+from immukv._internal.async_s3_client import AsyncBrandedS3Client, create_async_s3_client
 from immukv._internal.s3_helpers import get_error_code, read_body_as_json
 from immukv._internal.s3_types import S3KeyPath
 from immukv.json_helpers import JSONValue
 from immukv.types import S3Credentials, S3Overrides
-
 
 # Skip if not in integration test mode
 pytestmark = pytest.mark.skipif(
@@ -39,6 +40,16 @@ def identity_encoder(value: object) -> JSONValue:
     return value  # type: ignore[return-value]
 
 
+def dict_decoder(value: JSONValue) -> dict[str, object]:
+    """Decoder that casts JSONValue to dict[str, object]."""
+    return cast(dict[str, object], value)
+
+
+def dict_encoder(value: dict[str, object]) -> JSONValue:
+    """Encoder that casts dict[str, object] to JSONValue."""
+    return cast(JSONValue, value)
+
+
 @pytest.fixture(scope="session")  # type: ignore[misc]
 def raw_s3() -> S3Client:
     """Create raw S3 client for bucket management."""
@@ -55,10 +66,29 @@ def raw_s3() -> S3Client:
     )
 
 
-@pytest.fixture(scope="session")  # type: ignore[misc]
-def s3_client(raw_s3: S3Client) -> BrandedS3Client:
-    """Create branded S3 client for type-safe operations."""
-    return BrandedS3Client(raw_s3)
+@pytest_asyncio.fixture  # type: ignore[misc]
+async def s3_client() -> AsyncGenerator[AsyncBrandedS3Client[str], None]:
+    """Create async branded S3 client for type-safe operations."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    config = Config(
+        s3_bucket="test-bucket",  # Not used for client creation
+        s3_region="us-east-1",
+        s3_prefix="test/",
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=S3Credentials(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+            ),
+            force_path_style=True,
+        ),
+    )
+
+    async with create_async_s3_client(config) as client:
+        yield client
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -97,8 +127,8 @@ def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
         print(f"Warning: Cleanup failed for bucket {bucket_name}: {e}")
 
 
-@pytest.fixture  # type: ignore[misc]
-def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
+@pytest_asyncio.fixture  # type: ignore[misc]
+async def client(s3_bucket: str) -> AsyncGenerator[ImmuKVClient[str, object], None]:
     """Create ImmuKV client connected to MinIO."""
     endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
@@ -119,23 +149,22 @@ def client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
         ),
     )
 
-    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
-        config, identity_decoder, identity_encoder
-    )
-    with client_instance as client:
-        yield client
+    client_instance: ImmuKVClient[str, object]
+    async with ImmuKVClient.create(config, identity_decoder, identity_encoder) as client_instance:
+        yield client_instance
 
 
 # --- Integration Tests ---
 
 
-def test_real_s3_versioning_creates_unique_version_ids(
+@pytest.mark.asyncio
+async def test_real_s3_versioning_creates_unique_version_ids(
     client: ImmuKVClient[str, object],
 ) -> None:
     """Verify that real S3 versioning creates unique version IDs."""
-    entry1 = client.set("key1", {"version": 1})
-    entry2 = client.set("key1", {"version": 2})
-    entry3 = client.set("key2", {"version": 1})
+    entry1 = await client.set("key1", {"version": 1})
+    entry2 = await client.set("key1", {"version": 2})
+    entry3 = await client.set("key2", {"version": 1})
 
     # Version IDs should be unique and non-trivial
     assert entry1.version_id != entry2.version_id
@@ -143,34 +172,36 @@ def test_real_s3_versioning_creates_unique_version_ids(
     assert len(entry1.version_id) > 10  # Real S3 version IDs are long
 
 
-def test_real_etag_generation_and_validation(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_real_etag_generation_and_validation(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify that real S3 generates ETags and validates them."""
-    entry = client.set("key1", {"data": "value"})
+    await client.set("key1", {"data": "value"})
 
     # Get the key object and check ETag
     key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
-    response = s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
+    response = await s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
 
     etag: str = response["ETag"]
     assert etag.startswith('"') and etag.endswith('"')
     assert len(etag) > 10  # Real ETags are MD5 hashes
 
 
-def test_conditional_write_if_match_succeeds(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_conditional_write_if_match_succeeds(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify IfMatch conditional write succeeds with correct ETag."""
-    client.set("key1", {"version": 1})
+    await client.set("key1", {"version": 1})
 
     # Get current ETag
     key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
-    response = s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
+    response = await s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
     correct_etag = response["ETag"]
 
     # Write with IfMatch should succeed
-    s3_client.put_object(
+    await s3_client.put_object(
         bucket=client._config.s3_bucket,
         key=key_path,
         body=b'{"test": "update"}',
@@ -178,16 +209,17 @@ def test_conditional_write_if_match_succeeds(
     )
 
 
-def test_conditional_write_if_match_fails(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_conditional_write_if_match_fails(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify IfMatch conditional write fails with wrong ETag."""
-    client.set("key1", {"version": 1})
+    await client.set("key1", {"version": 1})
 
     # Write with wrong ETag should fail
     key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
     with pytest.raises(ClientError) as exc_info:  # type: ignore[misc]
-        s3_client.put_object(
+        await s3_client.put_object(
             bucket=client._config.s3_bucket,
             key=key_path,
             body=b'{"test": "update"}',
@@ -197,13 +229,14 @@ def test_conditional_write_if_match_fails(
     assert get_error_code(exc_info.value) == "PreconditionFailed"
 
 
-def test_conditional_write_if_none_match_creates_new(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_conditional_write_if_none_match_creates_new(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify IfNoneMatch='*' succeeds when key doesn't exist."""
     # Write with IfNoneMatch='*' should succeed for new key
     key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/new-key.json")
-    s3_client.put_object(
+    await s3_client.put_object(
         bucket=client._config.s3_bucket,
         key=key_path,
         body=b'{"test": "create"}',
@@ -211,16 +244,17 @@ def test_conditional_write_if_none_match_creates_new(
     )
 
 
-def test_conditional_write_if_none_match_fails_when_exists(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_conditional_write_if_none_match_fails_when_exists(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify IfNoneMatch='*' fails when key already exists."""
-    client.set("existing-key", {"version": 1})
+    await client.set("existing-key", {"version": 1})
 
     # Write with IfNoneMatch='*' should fail
     key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/existing-key.json")
     with pytest.raises(ClientError) as exc_info:  # type: ignore[misc]
-        s3_client.put_object(
+        await s3_client.put_object(
             bucket=client._config.s3_bucket,
             key=key_path,
             body=b'{"test": "create"}',
@@ -230,18 +264,21 @@ def test_conditional_write_if_none_match_fails_when_exists(
     assert get_error_code(exc_info.value) == "PreconditionFailed"
 
 
-def test_list_object_versions_returns_proper_order(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_list_object_versions_returns_proper_order(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify list_object_versions returns versions in proper order."""
     # Create multiple versions
-    entry1 = client.set("key1", {"version": 1})
-    entry2 = client.set("key1", {"version": 2})
-    entry3 = client.set("key1", {"version": 3})
+    await client.set("key1", {"version": 1})
+    await client.set("key1", {"version": 2})
+    await client.set("key1", {"version": 3})
 
     # List versions
     prefix_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
-    response = s3_client.list_object_versions(bucket=client._config.s3_bucket, prefix=prefix_path)
+    response = await s3_client.list_object_versions(
+        bucket=client._config.s3_bucket, prefix=prefix_path
+    )
 
     versions = response["Versions"]
     assert versions is not None
@@ -251,17 +288,20 @@ def test_list_object_versions_returns_proper_order(
     assert all("VersionId" in v for v in versions)
 
 
-def test_log_object_structure_matches_spec(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_log_object_structure_matches_spec(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify log object contains all required fields per design doc."""
-    entry = client.set("key1", {"data": "value"})
+    await client.set("key1", {"data": "value"})
 
     # Read log object directly from S3
     log_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}_log.json")
-    response = s3_client.get_object(bucket=client._config.s3_bucket, key=log_path, version_id=None)
+    response = await s3_client.get_object(
+        bucket=client._config.s3_bucket, key=log_path, version_id=None
+    )
 
-    log_data = read_body_as_json(response["Body"])
+    log_data = _read_body_as_json_from_bytes(response["Body"])
 
     # Verify always-required fields
     required_fields = [
@@ -284,17 +324,20 @@ def test_log_object_structure_matches_spec(
     ), "Genesis entry should omit previous_key_object_etag"
 
 
-def test_key_object_structure_matches_spec(
-    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+@pytest.mark.asyncio
+async def test_key_object_structure_matches_spec(
+    client: ImmuKVClient[str, object], s3_client: AsyncBrandedS3Client[str]
 ) -> None:
     """Verify key object contains required fields and excludes infrastructure fields."""
-    entry = client.set("key1", {"data": "value"})
+    await client.set("key1", {"data": "value"})
 
     # Read key object directly from S3
     key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/key1.json")
-    response = s3_client.get_object(bucket=client._config.s3_bucket, key=key_path, version_id=None)
+    response = await s3_client.get_object(
+        bucket=client._config.s3_bucket, key=key_path, version_id=None
+    )
 
-    key_data = read_body_as_json(response["Body"])
+    key_data = _read_body_as_json_from_bytes(response["Body"])
 
     # Verify required fields
     required_fields = [
@@ -317,119 +360,140 @@ def test_key_object_structure_matches_spec(
         assert field not in key_data, f"Key object should not contain infrastructure field: {field}"
 
 
-def test_none_values_omitted_from_json(s3_bucket: str, s3_client: BrandedS3Client) -> None:
+@pytest.mark.asyncio
+async def test_none_values_omitted_from_json(
+    s3_bucket: str, s3_client: AsyncBrandedS3Client[str]
+) -> None:
     """Test that None values are stripped from JSON to match TypeScript undefined behavior."""
     endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
 
-    client = ImmuKVClient[str, dict[str, object]](
-        config=Config(
-            s3_bucket=s3_bucket,
-            s3_region="us-east-1",
-            s3_prefix="test-none-strip/",
-            overrides=S3Overrides(
-                endpoint_url=endpoint_url,
-                credentials=S3Credentials(
-                    aws_access_key_id=access_key, aws_secret_access_key=secret_key
-                ),
-                force_path_style=True,
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test-none-strip/",
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=S3Credentials(
+                aws_access_key_id=access_key, aws_secret_access_key=secret_key
             ),
+            force_path_style=True,
         ),
-        value_decoder=lambda v: cast(dict[str, object], v),
-        value_encoder=lambda v: cast(JSONValue, v),
     )
 
-    # First write - creates genesis entry with previous_version_id=None, previous_key_object_etag=None
-    entry1 = client.set("test-key", {"value": "first"})
+    test_client: ImmuKVClient[str, dict[str, object]]
+    async with ImmuKVClient.create(
+        config,
+        dict_decoder,
+        dict_encoder,
+    ) as test_client:
+        # First write - creates genesis entry with previous_version_id=None, previous_key_object_etag=None
+        entry1: Entry[str, dict[str, object]] = await test_client.set(
+            "test-key", {"value": "first"}  # type: ignore[arg-type]
+        )
 
-    # Read raw log entry from S3 to verify None fields are omitted
-    log_response = s3_client.get_object(
-        bucket=s3_bucket,
-        key=S3KeyPath(f"test-none-strip/_log.json"),
-        version_id=entry1.version_id,
-    )
-    log_data = read_body_as_json(log_response["Body"])
+        # Read raw log entry from S3 to verify None fields are omitted
+        log_response = await s3_client.get_object(
+            bucket=s3_bucket,
+            key=S3KeyPath("test-none-strip/_log.json"),
+            version_id=entry1.version_id,
+        )
+        log_data = _read_body_as_json_from_bytes(log_response["Body"])
 
-    # Verify None values were stripped (fields should not exist in JSON)
-    assert "previous_version_id" not in log_data, "None value should be omitted from JSON"
-    assert (
-        "previous_key_object_etag" not in log_data
-    ), "None value should be omitted from JSON"
+        # Verify None values were stripped (fields should not exist in JSON)
+        assert "previous_version_id" not in log_data, "None value should be omitted from JSON"
+        assert "previous_key_object_etag" not in log_data, "None value should be omitted from JSON"
 
-    # Second write - has previous_version_id but previous_key_object_etag might be None
-    entry2 = client.set("test-key", {"value": "second"})
+        # Second write - has previous_version_id but previous_key_object_etag might be None
+        entry2: Entry[str, dict[str, object]] = await test_client.set(
+            "test-key", {"value": "second"}  # type: ignore[arg-type]
+        )
 
-    log_response2 = s3_client.get_object(
-        bucket=s3_bucket,
-        key=S3KeyPath(f"test-none-strip/_log.json"),
-        version_id=entry2.version_id,
-    )
-    log_data2 = read_body_as_json(log_response2["Body"])
+        log_response2 = await s3_client.get_object(
+            bucket=s3_bucket,
+            key=S3KeyPath("test-none-strip/_log.json"),
+            version_id=entry2.version_id,
+        )
+        log_data2 = _read_body_as_json_from_bytes(log_response2["Body"])
 
-    # Second entry should have previous_version_id (not None)
-    assert "previous_version_id" in log_data2, "Non-None value should be present in JSON"
-    assert log_data2["previous_version_id"] == entry1.version_id
+        # Second entry should have previous_version_id (not None)
+        assert "previous_version_id" in log_data2, "Non-None value should be present in JSON"
+        assert log_data2["previous_version_id"] == entry1.version_id
 
-    # If previous_key_object_etag is None, it should be omitted
-    # If it exists, it should have a value
-    if "previous_key_object_etag" in log_data2:
-        assert log_data2["previous_key_object_etag"] is not None
+        # If previous_key_object_etag is None, it should be omitted
+        # If it exists, it should have a value
+        if "previous_key_object_etag" in log_data2:
+            assert log_data2["previous_key_object_etag"] is not None
 
 
-def test_missing_optional_fields_handled_correctly(s3_bucket: str, s3_client: BrandedS3Client) -> None:
+@pytest.mark.asyncio
+async def test_missing_optional_fields_handled_correctly(
+    s3_bucket: str, s3_client: AsyncBrandedS3Client[str]
+) -> None:
     """Test that missing optional fields (from TypeScript undefined) are handled as None."""
     endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
 
-    client = ImmuKVClient[str, dict[str, object]](
-        config=Config(
-            s3_bucket=s3_bucket,
-            s3_region="us-east-1",
-            s3_prefix="test-missing-fields/",
-            overrides=S3Overrides(
-                endpoint_url=endpoint_url,
-                credentials=S3Credentials(
-                    aws_access_key_id=access_key, aws_secret_access_key=secret_key
-                ),
-                force_path_style=True,
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test-missing-fields/",
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=S3Credentials(
+                aws_access_key_id=access_key, aws_secret_access_key=secret_key
             ),
+            force_path_style=True,
         ),
-        value_decoder=lambda v: cast(dict[str, object], v),
-        value_encoder=lambda v: cast(JSONValue, v),
     )
 
-    entry = client.set("test-key", {"value": "test"})
+    test_client: ImmuKVClient[str, dict[str, object]]
+    async with ImmuKVClient.create(
+        config,
+        dict_decoder,
+        dict_encoder,
+    ) as test_client:
+        await test_client.set("test-key", {"value": "test"})  # type: ignore[arg-type]
 
-    # Manually write a log entry with optional fields completely missing (simulating TypeScript)
-    manually_created_log = {
-        "sequence": 99,
-        "key": "manual-key",
-        "value": {"data": "manual"},
-        "timestamp_ms": 1234567890000,
-        "hash": "sha256:" + "a" * 64,
-        "previous_hash": "sha256:genesis",
-        # Deliberately omit previous_version_id and previous_key_object_etag
-    }
+        # Manually write a log entry with optional fields completely missing (simulating TypeScript)
+        manually_created_log = {
+            "sequence": 99,
+            "key": "manual-key",
+            "value": {"data": "manual"},
+            "timestamp_ms": 1234567890000,
+            "hash": "sha256:" + "a" * 64,
+            "previous_hash": "sha256:genesis",
+            # Deliberately omit previous_version_id and previous_key_object_etag
+        }
 
-    s3_client.put_object(
-        bucket=s3_bucket,
-        key=S3KeyPath(f"test-missing-fields/_log.json"),
-        body=json.dumps(manually_created_log).encode("utf-8"),
-        content_type="application/json",
-    )
+        await s3_client.put_object(
+            bucket=s3_bucket,
+            key=S3KeyPath("test-missing-fields/_log.json"),
+            body=json.dumps(manually_created_log).encode("utf-8"),
+            content_type="application/json",
+        )
 
-    # Read it back - should handle missing fields as None
-    log_response = s3_client.get_object(
-        bucket=s3_bucket, key=S3KeyPath(f"test-missing-fields/_log.json"), version_id=None
-    )
-    log_data = read_body_as_json(log_response["Body"])
+        # Read it back - should handle missing fields as None
+        log_response = await s3_client.get_object(
+            bucket=s3_bucket, key=S3KeyPath("test-missing-fields/_log.json"), version_id=None
+        )
+        log_data = _read_body_as_json_from_bytes(log_response["Body"])
 
-    # Verify fields are missing (TypeScript undefined behavior)
-    assert "previous_version_id" not in log_data
-    assert "previous_key_object_etag" not in log_data
+        # Verify fields are missing (TypeScript undefined behavior)
+        assert "previous_version_id" not in log_data
+        assert "previous_key_object_etag" not in log_data
 
-    # Python should handle missing fields gracefully via get() returning None
-    assert log_data.get("previous_version_id") is None
-    assert log_data.get("previous_key_object_etag") is None
+        # Python should handle missing fields gracefully via get() returning None
+        assert log_data.get("previous_version_id") is None
+        assert log_data.get("previous_key_object_etag") is None
+
+
+def _read_body_as_json_from_bytes(body: object) -> dict[str, JSONValue]:
+    """Read body as JSON from bytes (for async client)."""
+    if isinstance(body, bytes):
+        return cast(dict[str, JSONValue], json.loads(body.decode("utf-8")))
+    else:
+        # Fallback for streaming
+        return read_body_as_json(body)
