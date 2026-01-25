@@ -34,6 +34,16 @@ jobs:
           echo "packages/files/typescript immukv dependency: $TS_FILES_DEP"
           [ "$TS_FILES_DEP" = "$TAG_VERSION" ] || { echo "Mismatch or not pinned!"; exit 1; }
 
+          # Check TypeScript core package-lock.json
+          TS_CORE_LOCK=$(node -p "require('./typescript/package-lock.json').version")
+          echo "typescript/package-lock.json: $TS_CORE_LOCK"
+          [ "$TS_CORE_LOCK" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          # Check TypeScript files package-lock.json
+          TS_FILES_LOCK=$(node -p "require('./packages/files/typescript/package-lock.json').version")
+          echo "packages/files/typescript/package-lock.json: $TS_FILES_LOCK"
+          [ "$TS_FILES_LOCK" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
           # Check Python core
           pip install --no-cache-dir tomli -q
           PY_CORE=$(python -c "import tomli; print(tomli.load(open('python/pyproject.toml', 'rb'))['project']['version'])")
