@@ -1,5 +1,6 @@
 """ImmuKV client implementation."""
 
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar, cast
@@ -141,6 +142,8 @@ class ImmuKVClient(Generic[K, V]):
 
         # Retry loop for optimistic locking on log writes
         max_retries = 10
+        last_error: Optional[ClientError] = None
+
         for attempt in range(max_retries):
             # ===== Pre-Flight: Repair (with ETag) =====
             result = self._get_latest_and_repair()
@@ -237,13 +240,27 @@ class ImmuKVClient(Generic[K, V]):
 
             except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
                 if get_error_code(e) == "PreconditionFailed":
+                    last_error = e
                     logger.debug(f"Log write conflict, retry {attempt + 1}/{max_retries}")
                     continue
                 else:
                     raise
 
         else:
-            raise Exception(f"Failed to write log after {max_retries} retries")
+            diagnostic_info: Dict[str, object] = {}
+            if last_error is not None:
+                error_response = last_error.response  # type: ignore[misc]
+                response_metadata = error_response.get("ResponseMetadata", {})  # type: ignore[misc]
+                diagnostic_info = {
+                    "httpStatus": response_metadata.get("HTTPStatusCode"),  # type: ignore[misc]
+                    "errorCode": get_error_code(last_error),
+                    "errorMessage": str(last_error),
+                    "requestId": response_metadata.get("RequestId"),  # type: ignore[misc]
+                }
+
+            raise Exception(
+                f"Failed to write log after {max_retries} retries: {json.dumps(diagnostic_info)}"
+            ) from last_error
 
         # ===== Write Phase 2: Write Key Object (with conditional write) =====
 

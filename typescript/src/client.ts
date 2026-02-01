@@ -78,6 +78,8 @@ export class ImmuKVClient<K extends string = string, V = any> {
     }
 
     const maxRetries = 10;
+    let lastError: any;
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       // Pre-flight: Repair
       const result = await this.getLatestAndRepair();
@@ -193,13 +195,30 @@ export class ImmuKVClient<K extends string = string, V = any> {
         };
       } catch (error: any) {
         if (error.name === 'PreconditionFailed' || error.$metadata?.httpStatusCode === 412) {
+          lastError = error;
           continue;
         }
         throw error;
       }
     }
 
-    throw new Error(`Failed to write log after ${maxRetries} retries`);
+    const diagnosticInfo =
+      lastError !== undefined
+        ? {
+            httpStatus: lastError.$metadata?.httpStatusCode,
+            errorName: lastError.name,
+            errorMessage: lastError.message,
+            requestId: lastError.$metadata?.requestId,
+          }
+        : {};
+
+    const error = new Error(
+      `Failed to write log after ${maxRetries} retries: ${JSON.stringify(diagnosticInfo)}`
+    );
+    if (lastError !== undefined) {
+      (error as any).cause = lastError;
+    }
+    throw error;
   }
 
   /**
