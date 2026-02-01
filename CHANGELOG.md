@@ -5,6 +5,14 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.19] - 2026-02-02
+
+### Fixed
+
+- Error thrown when `set()` exhausts retries now includes diagnostic details:
+  - HTTP status code, error name/code, error message, and S3 request ID
+  - Original S3 error attached as `cause` for full stack trace access
+
 ## [0.1.18] - 2025-11-21
 
 ### Added
