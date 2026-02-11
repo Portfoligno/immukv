@@ -7,7 +7,7 @@ from typing import Generic, NotRequired, Optional, TypedDict, TypeVar
 
 # Re-export these from parent for internal use
 from immukv.json_helpers import JSONValue
-from immukv.types import Entry, Hash, KeyObjectETag, LogVersionId, Sequence, TimestampMs
+from immukv.types import Hash, KeyObjectETag, LogVersionId, Sequence, TimestampMs
 
 K = TypeVar("K", bound=str)
 V = TypeVar("V")
