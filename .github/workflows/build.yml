@@ -35,6 +35,16 @@ jobs:
           echo "python/pyproject.toml: $PY_CORE"
           [ "$PY_CORE" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
 
+          # Check CDK
+          CDK=$(node -p "require('./cdk/package.json').version")
+          echo "cdk/package.json: $CDK"
+          [ "$CDK" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          # Check CDK package-lock.json
+          CDK_LOCK=$(node -p "require('./cdk/package-lock.json').version")
+          echo "cdk/package-lock.json: $CDK_LOCK"
+          [ "$CDK_LOCK" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
           echo "All versions match tag $TAG_VERSION"
 
   python:
@@ -311,19 +321,6 @@ jobs:
         working-directory: cdk
         run: |
           npm run package:python
-
-      - name: Verify version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        working-directory: cdk
-        run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION=${GITHUB_REF#refs/tags/}
-          # CDK uses semver format (e.g., 0.1.11-dev.0) which needs special handling
-          # For release tags, we expect the package version without -dev suffix
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
 
       - name: Upload CDK TypeScript distribution artifacts
         if: startsWith(github.ref, 'refs/tags/')
