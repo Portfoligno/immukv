@@ -24,6 +24,11 @@ jobs:
           echo "typescript/package.json: $TS_CORE"
           [ "$TS_CORE" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
 
+          # Check TypeScript core package-lock.json
+          TS_CORE_LOCK=$(node -p "require('./typescript/package-lock.json').version")
+          echo "typescript/package-lock.json: $TS_CORE_LOCK"
+          [ "$TS_CORE_LOCK" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
           # Check Python core
           pip install --no-cache-dir tomli -q
           PY_CORE=$(python -c "import tomli; print(tomli.load(open('python/pyproject.toml', 'rb'))['project']['version'])")
