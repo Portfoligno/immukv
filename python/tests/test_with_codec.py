@@ -21,7 +21,6 @@ from immukv import Config, ImmuKVClient
 from immukv.json_helpers import JSONValue
 from immukv.types import S3Credentials, S3Overrides
 
-
 # Skip if not in integration test mode
 pytestmark = pytest.mark.skipif(
     os.getenv("IMMUKV_INTEGRATION_TEST") != "true",
@@ -126,9 +125,7 @@ def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
     """Create unique S3 bucket for each test — ensures complete isolation."""
     bucket_name = f"test-codec-{uuid.uuid4().hex[:8]}"
     raw_s3.create_bucket(Bucket=bucket_name)
-    raw_s3.put_bucket_versioning(
-        Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"}
-    )
+    raw_s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
 
     yield bucket_name
 
@@ -173,9 +170,7 @@ def _make_config(s3_bucket: str, repair_interval_ms: int = 0) -> Config:
 def wide_client(s3_bucket: str) -> Generator[ImmuKVClient[str, object], None, None]:
     """Wide client with identity codec — accepts any JSONValue."""
     config = _make_config(s3_bucket, repair_interval_ms=0)
-    instance: ImmuKVClient[str, object] = ImmuKVClient(
-        config, identity_decoder, identity_encoder
-    )
+    instance: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
     with instance as c:
         yield c
 
@@ -283,23 +278,17 @@ class TestGetPeriodicRepairSurvivesCrossTypeEntries:
         result = narrow.get("sensor-01")
         assert result.value == {"temp": 25.0}
 
-    def test_narrow_get_triggers_repair_on_wide_orphan(
-        self, s3_bucket: str
-    ) -> None:
+    def test_narrow_get_triggers_repair_on_wide_orphan(self, s3_bucket: str) -> None:
         """Test 5: Narrow get() triggers repair on wide-typed orphan.
 
         When the latest log entry is wide-typed AND orphaned, the narrow
         client's repair must preserve the raw value without decoding.
         """
         config = _make_config(s3_bucket, repair_interval_ms=0)
-        wide: ImmuKVClient[str, object] = ImmuKVClient(
-            config, identity_decoder, identity_encoder
-        )
+        wide: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
         with wide:
             # Write narrow entry (gives get() something to find)
-            narrow: ImmuKVClient[str, NarrowA] = wide.with_codec(
-                narrow_a_decoder, narrow_a_encoder
-            )
+            narrow: ImmuKVClient[str, NarrowA] = wide.with_codec(narrow_a_decoder, narrow_a_encoder)
             narrow.set("sensor-01", NarrowA(temp=30.0))
 
             # Write wide entry that will become the latest log entry
@@ -323,18 +312,14 @@ class TestRepairOrphanPreservesDataIntegrity:
     """Verify that orphan repair preserves the raw JSON value verbatim,
     without any decode/encode round-trip that could lose data."""
 
-    def test_repair_preserves_wide_value_verbatim(
-        self, s3_bucket: str
-    ) -> None:
+    def test_repair_preserves_wide_value_verbatim(self, s3_bucket: str) -> None:
         """Test 6: Repair preserves wide-typed value verbatim.
 
         A wide entry with many fields must not lose any fields when repaired
         by a narrow client (no decode->encode elimination).
         """
         config = _make_config(s3_bucket, repair_interval_ms=0)
-        wide: ImmuKVClient[str, object] = ImmuKVClient(
-            config, identity_decoder, identity_encoder
-        )
+        wide: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
         with wide:
             # Write a rich wide-typed value
             wide_value: object = {
@@ -346,9 +331,7 @@ class TestRepairOrphanPreservesDataIntegrity:
             wide.set("rich-sensor", wide_value)
 
             # Create narrow client and trigger repair via set()
-            narrow: ImmuKVClient[str, NarrowA] = wide.with_codec(
-                narrow_a_decoder, narrow_a_encoder
-            )
+            narrow: ImmuKVClient[str, NarrowA] = wide.with_codec(narrow_a_decoder, narrow_a_encoder)
             narrow.set("other-key", NarrowA(temp=10.0))
 
             # Read the wide entry back via the wide client
@@ -361,18 +344,14 @@ class TestRepairOrphanPreservesDataIntegrity:
             assert result_value["location"] == "building-A"
             assert result_value["tags"] == ["indoor", "floor-3"]
 
-    def test_repair_with_lossy_decoder_does_not_corrupt(
-        self, s3_bucket: str
-    ) -> None:
+    def test_repair_with_lossy_decoder_does_not_corrupt(self, s3_bucket: str) -> None:
         """Test 7: Repair with lossy narrow decoder does not corrupt.
 
         Even if the narrow decoder strips fields, repair must use the raw
         log value (not decoder output), so no data is lost.
         """
         config = _make_config(s3_bucket, repair_interval_ms=0)
-        wide: ImmuKVClient[str, object] = ImmuKVClient(
-            config, identity_decoder, identity_encoder
-        )
+        wide: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
         with wide:
             # Write a value with many fields
             wide.set("multi-field", {"temp": 20.0, "pressure": 1013, "wind": 5.2})
@@ -493,9 +472,7 @@ class TestEdgeCases:
         entry_b = narrow_b.set("counter-04", NarrowB(count=400))
         assert entry_b.value == {"count": 400}
 
-    def test_rapid_alternating_set_with_repair_interval_zero(
-        self, s3_bucket: str
-    ) -> None:
+    def test_rapid_alternating_set_with_repair_interval_zero(self, s3_bucket: str) -> None:
         """Test 11: Rapid alternating set() with repair interval 0ms.
 
         Every call triggers repair with cross-type latest. With repair_interval_ms=0,
@@ -503,13 +480,9 @@ class TestEdgeCases:
         code path where the latest log entry is always the other type.
         """
         config = _make_config(s3_bucket, repair_interval_ms=0)
-        wide: ImmuKVClient[str, object] = ImmuKVClient(
-            config, identity_decoder, identity_encoder
-        )
+        wide: ImmuKVClient[str, object] = ImmuKVClient(config, identity_decoder, identity_encoder)
         with wide:
-            narrow: ImmuKVClient[str, NarrowA] = wide.with_codec(
-                narrow_a_decoder, narrow_a_encoder
-            )
+            narrow: ImmuKVClient[str, NarrowA] = wide.with_codec(narrow_a_decoder, narrow_a_encoder)
 
             # Rapid alternation — each set() sees the other type as latest
             for i in range(10):

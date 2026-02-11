@@ -21,7 +21,6 @@ from immukv._internal.s3_types import S3KeyPath
 from immukv.json_helpers import JSONValue
 from immukv.types import S3Credentials, S3Overrides
 
-
 # Skip if not in integration test mode
 pytestmark = pytest.mark.skipif(
     os.getenv("IMMUKV_INTEGRATION_TEST") != "true",
@@ -353,9 +352,7 @@ def test_none_values_omitted_from_json(s3_bucket: str, s3_client: BrandedS3Clien
 
     # Verify None values were stripped (fields should not exist in JSON)
     assert "previous_version_id" not in log_data, "None value should be omitted from JSON"
-    assert (
-        "previous_key_object_etag" not in log_data
-    ), "None value should be omitted from JSON"
+    assert "previous_key_object_etag" not in log_data, "None value should be omitted from JSON"
 
     # Second write - has previous_version_id but previous_key_object_etag might be None
     entry2 = client.set("test-key", {"value": "second"})
@@ -377,7 +374,9 @@ def test_none_values_omitted_from_json(s3_bucket: str, s3_client: BrandedS3Clien
         assert log_data2["previous_key_object_etag"] is not None
 
 
-def test_missing_optional_fields_handled_correctly(s3_bucket: str, s3_client: BrandedS3Client) -> None:
+def test_missing_optional_fields_handled_correctly(
+    s3_bucket: str, s3_client: BrandedS3Client
+) -> None:
     """Test that missing optional fields (from TypeScript undefined) are handled as None."""
     endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://minio:9000")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
