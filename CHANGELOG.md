@@ -5,6 +5,19 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.21] - 2026-02-11
+
+### Fixed
+
+- `verifyLogChain()` / `verify_log_chain()` no longer crashes when called from a
+  `withCodec` client on a log containing entries from differently-typed clients
+  - Verification now uses raw JSON values directly from S3, bypassing the
+    decode/encode round-trip entirely
+  - This is also strictly more correct for lossy codecs (no false negatives)
+- Python: `log_entries()` and `history()` now send `KeyMarker` alongside
+  `VersionIdMarker` in S3 `ListObjectVersions` calls, matching the TypeScript
+  implementation and the S3 API contract
+
 ## [0.1.20] - 2026-02-11
 
 ### Fixed
@@ -270,6 +283,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.21]: https://github.com/Portfoligno/immukv/releases/tag/0.1.21
 [0.1.20]: https://github.com/Portfoligno/immukv/releases/tag/0.1.20
 [0.1.19]: https://github.com/Portfoligno/immukv/releases/tag/0.1.19
 [0.1.18]: https://github.com/Portfoligno/immukv/releases/tag/0.1.18
