@@ -630,14 +630,14 @@ class ImmuKVClient(Generic[K, V]):
         Returns:
             True if chain is valid, False otherwise
         """
-        entries = self.log_entries(None, limit)
+        entries = self._raw_log_entries(limit)
 
         if not entries:
             return True
 
         # Verify each entry's hash
         for entry in entries:
-            if not self.verify(entry):
+            if not self._verify_raw(entry):
                 logger.error(f"Hash verification failed for entry {entry.sequence}")
                 return False
 
@@ -653,6 +653,86 @@ class ImmuKVClient(Generic[K, V]):
                 return False
 
         return True
+
+    def _verify_raw(self, entry: RawEntry[K]) -> bool:
+        """Verify single raw entry integrity (no decode/encode round-trip).
+
+        Uses entry.value directly — the raw JSONValue from S3, which is the
+        exact encoded value that was hashed at write time.
+        """
+        entry_for_hash: LogEntryForHash[K, JSONValue] = {
+            "sequence": entry.sequence,
+            "key": entry.key,
+            "value": entry.value,
+            "timestamp_ms": entry.timestamp_ms,
+            "previous_hash": entry.previous_hash,
+        }
+        expected_hash = self._calculate_hash(entry_for_hash)
+        return entry.hash == expected_hash
+
+    def _raw_log_entries(self, limit: Optional[int] = None) -> List[RawEntry[K]]:
+        """Get raw entries from global log for internal use (no value decoding).
+
+        Mirrors log_entries() S3 iteration but uses raw_entry_from_log()
+        instead of entry_from_log(), bypassing the value decoder entirely.
+
+        Args:
+            limit: Maximum number of entries to return. Pass None for unlimited.
+
+        Returns:
+            List of raw entries in descending order (newest first)
+        """
+        entries: List[RawEntry[K]] = []
+
+        try:
+            key_marker: Optional[str] = None
+            version_id_marker: Optional[str] = None
+
+            while True:
+                list_params: Dict[str, Any] = {  # type: ignore[misc,explicit-any]
+                    "bucket": self._config.s3_bucket,
+                    "prefix": self._log_key,
+                }
+                if key_marker is not None:
+                    list_params["KeyMarker"] = key_marker  # type: ignore[misc]
+                if version_id_marker is not None:
+                    list_params["VersionIdMarker"] = version_id_marker  # type: ignore[misc]
+
+                page = self._s3.list_object_versions(**list_params)  # type: ignore[misc]
+                versions_result = page.get("Versions")
+                versions = versions_result if versions_result is not None else []
+                for version in versions:
+                    if version["Key"] != self._log_key:
+                        continue
+
+                    # Fetch version data
+                    response = self._s3.get_object(
+                        bucket=self._config.s3_bucket,
+                        key=self._log_key,
+                        version_id=version["VersionId"],
+                    )
+                    data = read_body_as_json(response["Body"])
+                    version_id_log: LogVersionId[K] = ObjectVersions.log_version_id(version)
+                    entry: RawEntry[K] = raw_entry_from_log(data, version_id_log)
+                    entries.append(entry)
+
+                    # Check limit
+                    if limit is not None and len(entries) >= limit:
+                        return entries
+
+                # Check if more pages
+                if not page.get("IsTruncated", False):
+                    break
+
+                key_marker = page.get("NextKeyMarker")
+                version_id_marker = page.get("NextVersionIdMarker")
+
+        except ClientError as e:  # type: ignore[misc]
+            if get_error_code(e) in ["NoSuchKey", "404"]:
+                return []
+            raise
+
+        return entries
 
     def with_codec(
         self, value_decoder: ValueDecoder[V2], value_encoder: ValueEncoder[V2]

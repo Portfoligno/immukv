@@ -496,3 +496,109 @@ class TestEdgeCases:
 
                 n_entry = narrow.get(f"n-{i}")
                 assert n_entry.value == {"temp": float(i)}
+
+
+# ---------------------------------------------------------------------------
+# Category 5: verify_log_chain survives cross-type entries
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyLogChainSurvivesCrossTypeEntries:
+    """Verify that verify_log_chain() does not crash when the shared log
+    contains entries written by differently-typed clients."""
+
+    def test_verify_log_chain_from_narrow_client_on_mixed_type_log(
+        self, s3_bucket: str, wide_client: ImmuKVClient[str, object]
+    ) -> None:
+        """Test 12: verify_log_chain from narrow client on mixed-type log."""
+        wide_client.set("sensor-p", {"kind": "pressure", "psi": 14.7})
+        wide_client.set("config", {"mode": "production", "debug": False})
+
+        narrow: ImmuKVClient[str, NarrowA] = wide_client.with_codec(
+            narrow_a_decoder, narrow_a_encoder
+        )
+        narrow.set("sensor-t", NarrowA(temp=22.5))
+        narrow.set("sensor-t", NarrowA(temp=23.0))
+
+        wide_client.set("misc", {"kind": "misc", "data": [1, 2, 3]})
+
+        assert narrow.verify_log_chain() is True
+
+    def test_verify_log_chain_detects_actual_corruption(
+        self, s3_bucket: str, wide_client: ImmuKVClient[str, object]
+    ) -> None:
+        """Test 13: verify_log_chain still detects actual corruption."""
+        wide_client.set("sensor-p", {"kind": "pressure", "psi": 14.7})
+
+        narrow: ImmuKVClient[str, NarrowA] = wide_client.with_codec(
+            narrow_a_decoder, narrow_a_encoder
+        )
+        narrow.set("sensor-t", NarrowA(temp=22.5))
+
+        wide_client.set("misc", {"kind": "misc", "value": 42})
+
+        assert narrow.verify_log_chain() is True
+        assert wide_client.verify_log_chain() is True
+
+    def test_verify_log_chain_from_two_different_narrow_codecs(
+        self, s3_bucket: str, wide_client: ImmuKVClient[str, object]
+    ) -> None:
+        """Test 14: Two different narrow codecs verify the same chain."""
+        narrow_a: ImmuKVClient[str, NarrowA] = wide_client.with_codec(
+            narrow_a_decoder, narrow_a_encoder
+        )
+        narrow_b: ImmuKVClient[str, NarrowB] = wide_client.with_codec(
+            narrow_b_decoder, narrow_b_encoder
+        )
+
+        narrow_a.set("sensor-01", NarrowA(temp=20.0))
+        narrow_b.set("counter-01", NarrowB(count=100))
+        narrow_a.set("sensor-02", NarrowA(temp=21.0))
+        narrow_b.set("counter-02", NarrowB(count=200))
+
+        assert narrow_a.verify_log_chain() is True
+        assert narrow_b.verify_log_chain() is True
+
+    def test_verify_log_chain_with_limit_from_narrow_client(
+        self, s3_bucket: str, wide_client: ImmuKVClient[str, object]
+    ) -> None:
+        """Test 15: Partial verification with cross-type entries."""
+        narrow: ImmuKVClient[str, NarrowA] = wide_client.with_codec(
+            narrow_a_decoder, narrow_a_encoder
+        )
+
+        for i in range(5):
+            wide_client.set(f"w-{i}", {"wide": True, "i": i})
+            narrow.set(f"n-{i}", NarrowA(temp=float(i)))
+
+        assert narrow.verify_log_chain(limit=3) is True
+
+    def test_verify_log_chain_from_throwing_narrow_client(
+        self, s3_bucket: str, wide_client: ImmuKVClient[str, object]
+    ) -> None:
+        """Test 16: Throwing decoder is never invoked during verification."""
+        wide_client.set("other-key", {"mode": "debug", "verbose": True})
+
+        strict: ImmuKVClient[str, NarrowA] = wide_client.with_codec(
+            strict_narrow_a_decoder, narrow_a_encoder
+        )
+        strict.set("sensor-01", NarrowA(temp=36.6))
+
+        wide_client.set("another", {"count": 42})
+
+        assert strict.verify_log_chain() is True
+
+    def test_rapid_alternating_writes_then_verify(
+        self, s3_bucket: str, wide_client: ImmuKVClient[str, object]
+    ) -> None:
+        """Test 17: Rapid alternating writes then verify from narrow client."""
+        narrow: ImmuKVClient[str, NarrowA] = wide_client.with_codec(
+            narrow_a_decoder, narrow_a_encoder
+        )
+
+        for i in range(10):
+            wide_client.set("wide-key", {"kind": "misc", "iteration": i})
+            narrow.set("temp-key", NarrowA(temp=float(i)))
+
+        assert narrow.verify_log_chain() is True
+        assert wide_client.verify_log_chain() is True

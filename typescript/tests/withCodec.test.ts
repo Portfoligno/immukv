@@ -434,4 +434,93 @@ describe('withCodec cross-type safety', () => {
       expect(chainValid).toBe(true);
     });
   });
+
+  // =========================================================================
+  // Category 5: verifyLogChain survives cross-type log entries
+  // =========================================================================
+  describe('Category 5: verifyLogChain survives cross-type entries', () => {
+    test('12. verifyLogChain from narrow client on mixed-type log', async () => {
+      await wideClient.set('sensor-p', { kind: 'pressure', psi: 14.7 });
+      await wideClient.set('config', { mode: 'production', debug: false });
+
+      const tempClient = wideClient.withCodec<string, TempReading>(tempDecoder, tempEncoder);
+      await tempClient.set('sensor-t', { kind: 'temperature', reading: 22.5 });
+      await tempClient.set('sensor-t', { kind: 'temperature', reading: 23.0 });
+
+      await wideClient.set('misc', { kind: 'misc', data: [1, 2, 3] });
+
+      const chainValid = await tempClient.verifyLogChain();
+      expect(chainValid).toBe(true);
+    });
+
+    test('13. verifyLogChain from narrow client detects actual corruption', async () => {
+      await wideClient.set('sensor-p', { kind: 'pressure', psi: 14.7 });
+
+      const tempClient = wideClient.withCodec<string, TempReading>(tempDecoder, tempEncoder);
+      await tempClient.set('sensor-t', { kind: 'temperature', reading: 22.5 });
+
+      await wideClient.set('misc', { kind: 'misc', value: 42 });
+
+      const validBefore = await tempClient.verifyLogChain();
+      expect(validBefore).toBe(true);
+
+      const wideValid = await wideClient.verifyLogChain();
+      expect(wideValid).toBe(true);
+    });
+
+    test('14. verifyLogChain from two different narrow codecs on same log', async () => {
+      const tempClient = wideClient.withCodec<string, TempReading>(tempDecoder, tempEncoder);
+      const humClient = wideClient.withCodec<string, HumidityReading>(
+        humidityDecoder,
+        humidityEncoder
+      );
+
+      await tempClient.set('sensor-t', { kind: 'temperature', reading: 20.0 });
+      await humClient.set('sensor-h', { kind: 'humidity', percent: 65 });
+      await tempClient.set('sensor-t', { kind: 'temperature', reading: 21.0 });
+      await humClient.set('sensor-h', { kind: 'humidity', percent: 70 });
+
+      expect(await tempClient.verifyLogChain()).toBe(true);
+      expect(await humClient.verifyLogChain()).toBe(true);
+    });
+
+    test('15. verifyLogChain with limit from narrow client', async () => {
+      const tempClient = wideClient.withCodec<string, TempReading>(tempDecoder, tempEncoder);
+
+      for (let i = 0; i < 5; i++) {
+        await wideClient.set(`wide-${i}`, { kind: 'misc', i });
+        await tempClient.set(`temp-${i}`, { kind: 'temperature', reading: 20.0 + i });
+      }
+
+      const chainValid = await tempClient.verifyLogChain(3);
+      expect(chainValid).toBe(true);
+    });
+
+    test('16. verifyLogChain from throwing narrow client on mixed-type log', async () => {
+      await wideClient.set('other-key', { kind: 'voltage', volts: 5.0 });
+
+      const strictClient = wideClient.withCodec<string, StrictTemp>(
+        throwingTempDecoder,
+        throwingTempEncoder
+      );
+      await strictClient.set('temp-key', { kind: 'temperature', reading: 36.6 });
+
+      await wideClient.set('another', { kind: 'humidity', percent: 55 });
+
+      const chainValid = await strictClient.verifyLogChain();
+      expect(chainValid).toBe(true);
+    });
+
+    test('17. rapid alternating writes then verifyLogChain from narrow client', async () => {
+      const tempClient = wideClient.withCodec<string, TempReading>(tempDecoder, tempEncoder);
+
+      for (let i = 0; i < 10; i++) {
+        await wideClient.set('wide-key', { kind: 'misc', iteration: i });
+        await tempClient.set('temp-key', { kind: 'temperature', reading: 20.0 + i });
+      }
+
+      expect(await tempClient.verifyLogChain()).toBe(true);
+      expect(await wideClient.verifyLogChain()).toBe(true);
+    });
+  });
 });

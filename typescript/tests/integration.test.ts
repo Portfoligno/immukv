@@ -262,14 +262,7 @@ describe('Integration Tests with MinIO', () => {
     const genesisData = JSON.parse(genesisDataStr);
 
     // Verify always-required fields
-    const requiredFields = [
-      'sequence',
-      'key',
-      'value',
-      'timestamp_ms',
-      'previous_hash',
-      'hash',
-    ];
+    const requiredFields = ['sequence', 'key', 'value', 'timestamp_ms', 'previous_hash', 'hash'];
 
     for (const field of requiredFields) {
       expect(genesisData).toHaveProperty(field);
@@ -320,19 +313,23 @@ describe('Integration Tests with MinIO', () => {
   test('undefined values omitted from JSON', async () => {
     if (!integrationTestEnabled) return;
 
-    const client = new ImmuKVClient<string, any>({
-      s3Bucket: bucketName,
-      s3Region: 'us-east-1',
-      s3Prefix: 'test-undefined-omit/',
-      overrides: {
-        endpointUrl: process.env.IMMUKV_S3_ENDPOINT,
-        credentials: {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'minioadmin',
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin',
+    const client = new ImmuKVClient<string, any>(
+      {
+        s3Bucket: bucketName,
+        s3Region: 'us-east-1',
+        s3Prefix: 'test-undefined-omit/',
+        overrides: {
+          endpointUrl: process.env.IMMUKV_S3_ENDPOINT,
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'minioadmin',
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin',
+          },
+          forcePathStyle: true,
         },
-        forcePathStyle: true,
       },
-    }, identityDecoder, identityEncoder);
+      identityDecoder,
+      identityEncoder
+    );
 
     // First write - creates genesis entry with previousVersionId=undefined, previousKeyObjectEtag=undefined
     const entry1 = await client.set('test-key', { value: 'first' });
@@ -382,19 +379,23 @@ describe('Integration Tests with MinIO', () => {
   test('missing optional fields handled correctly', async () => {
     if (!integrationTestEnabled) return;
 
-    const client = new ImmuKVClient<string, any>({
-      s3Bucket: bucketName,
-      s3Region: 'us-east-1',
-      s3Prefix: 'test-missing-fields-ts/',
-      overrides: {
-        endpointUrl: process.env.IMMUKV_S3_ENDPOINT,
-        credentials: {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'minioadmin',
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin',
+    const client = new ImmuKVClient<string, any>(
+      {
+        s3Bucket: bucketName,
+        s3Region: 'us-east-1',
+        s3Prefix: 'test-missing-fields-ts/',
+        overrides: {
+          endpointUrl: process.env.IMMUKV_S3_ENDPOINT,
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'minioadmin',
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin',
+          },
+          forcePathStyle: true,
         },
-        forcePathStyle: true,
       },
-    }, identityDecoder, identityEncoder);
+      identityDecoder,
+      identityEncoder
+    );
 
     await client.set('test-key', { value: 'test' });
 

@@ -551,17 +551,105 @@ export class ImmuKVClient<K extends string = string, V = any> {
   }
 
   /**
+   * Verify single raw entry integrity (no decode/encode round-trip).
+   * Uses entry.value directly (raw JSON from S3) instead of re-encoding.
+   */
+  private verifyRaw(entry: RawLogEntry<K>): boolean {
+    const entryForHash: LogEntryForHash<K, JSONValue> = {
+      sequence: entry.sequence,
+      key: entry.key,
+      value: entry.value,
+      timestampMs: entry.timestampMs,
+      previousHash: entry.previousHash,
+    };
+    const expectedHash = this.calculateHash(entryForHash);
+    return entry.hash === expectedHash;
+  }
+
+  /**
+   * Get raw entries from global log for internal use (no value decoding).
+   * Simpler than logEntries() — no beforeVersionId parameter.
+   */
+  private async rawLogEntries(limit: number | undefined): Promise<RawLogEntry<K>[]> {
+    const entries: RawLogEntry<K>[] = [];
+
+    try {
+      let versionIdMarker = undefined as LogVersionId<K> | undefined;
+      let isTruncated = true;
+
+      while (isTruncated) {
+        const response = await this.s3.listObjectVersions({
+          Bucket: this.config.s3Bucket,
+          Prefix: this.logKey,
+          KeyMarker: versionIdMarker !== undefined ? this.logKey : undefined,
+          VersionIdMarker: versionIdMarker,
+        });
+
+        const versions = response.Versions ?? [];
+        for (const version of versions) {
+          if (version.Key !== this.logKey) continue;
+
+          const objResponse = await this.s3.getObject({
+            Bucket: this.config.s3Bucket,
+            Key: this.logKey,
+            VersionId: version.VersionId,
+          });
+
+          const data = await readBodyAsJson(objResponse.Body);
+          const logVersionId = ObjectVersions.logVersionId<K>(version);
+
+          const entry: RawLogEntry<K> = {
+            key: data.key as K,
+            value: data.value,
+            timestampMs: timestampFromJson(data.timestamp_ms as number),
+            versionId: logVersionId,
+            sequence: sequenceFromJson(data.sequence as number),
+            previousVersionId:
+              data.previous_version_id !== undefined
+                ? (data.previous_version_id as LogVersionId<K>)
+                : undefined,
+            hash: hashFromJson(data.hash as string),
+            previousHash: hashFromJson(data.previous_hash as string),
+            previousKeyObjectEtag:
+              data.previous_key_object_etag !== undefined
+                ? (data.previous_key_object_etag as KeyObjectETag<K>)
+                : undefined,
+          };
+          entries.push(entry);
+
+          if (limit !== undefined && entries.length >= limit) {
+            return entries;
+          }
+        }
+
+        isTruncated = response.IsTruncated ?? false;
+        versionIdMarker =
+          response.NextVersionIdMarker !== undefined
+            ? (response.NextVersionIdMarker as LogVersionId<K>)
+            : undefined;
+      }
+    } catch (error: any) {
+      if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
+        return [];
+      }
+      throw error;
+    }
+
+    return entries;
+  }
+
+  /**
    * Verify hash chain in log.
    */
   async verifyLogChain(limit?: number): Promise<boolean> {
-    const entries = await this.logEntries(undefined, limit ?? undefined);
+    const entries = await this.rawLogEntries(limit ?? undefined);
 
     if (entries.length === 0) {
       return true;
     }
 
     for (const entry of entries) {
-      if (!(await this.verify(entry))) {
+      if (!this.verifyRaw(entry)) {
         console.error(`Hash verification failed for entry ${entry.sequence}`);
         return false;
       }
