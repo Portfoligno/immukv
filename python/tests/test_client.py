@@ -18,7 +18,6 @@ from immukv._internal.types import RawEntry
 from immukv.json_helpers import JSONValue
 from immukv.types import S3Credentials, S3Overrides
 
-
 # Skip if not in integration test mode
 pytestmark = pytest.mark.skipif(
     os.getenv("IMMUKV_INTEGRATION_TEST") != "true",
@@ -636,6 +635,73 @@ def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object
     assert entries[0].value == {"value": "v2"}  # Orphan entry
     assert entries[1].value == {"value": "v2"}  # Actual latest
     assert entries[2].value == {"value": "v1"}
+
+
+def test_orphan_status_none_does_not_trigger_orphan_fallback(
+    client: ImmuKVClient[str, object],
+) -> None:
+    """Test that is_orphaned=None (undefined) does not trigger orphan fallback in get() or history().
+
+    When is_orphaned has not been determined yet (None/undefined), the behavior should
+    match is_orphaned=False: no fallback in get(), no prepend in history().
+    """
+    from immukv.types import KeyNotFoundError
+
+    # Create an entry
+    entry = client.set("test-key", {"value": "test_data"})
+
+    # Set orphan status with is_orphaned not present (simulating undefined/None)
+    raw_entry = RawEntry(
+        key=entry.key,
+        value=cast(JSONValue, entry.value),
+        timestamp_ms=entry.timestamp_ms,
+        version_id=entry.version_id,
+        sequence=entry.sequence,
+        previous_version_id=entry.previous_version_id,
+        hash=entry.hash,
+        previous_hash=entry.previous_hash,
+        previous_key_object_etag=entry.previous_key_object_etag,
+    )
+
+    # OrphanStatus with total=False allows omitting is_orphaned entirely,
+    # which is the Python equivalent of TypeScript's isOrphaned: undefined
+    client._latest_orphan_status = {
+        "orphan_key": "nonexistent-key",
+        "orphan_entry": raw_entry,
+    }  # type: ignore[typeddict-item]
+
+    # get() on nonexistent key should raise KeyNotFoundError (no orphan fallback)
+    with pytest.raises(KeyNotFoundError, match="Key 'nonexistent-key' not found"):
+        client.get("nonexistent-key")
+
+    # Now test history() behavior with is_orphaned=None
+    # Write a second entry to test-key so history has content
+    entry2 = client.set("test-key", {"value": "v2"})
+
+    raw_entry2 = RawEntry(
+        key=entry2.key,
+        value=cast(JSONValue, entry2.value),
+        timestamp_ms=entry2.timestamp_ms,
+        version_id=entry2.version_id,
+        sequence=entry2.sequence,
+        previous_version_id=entry2.previous_version_id,
+        hash=entry2.hash,
+        previous_hash=entry2.previous_hash,
+        previous_key_object_etag=entry2.previous_key_object_etag,
+    )
+
+    client._latest_orphan_status = {
+        "orphan_key": "test-key",
+        "orphan_entry": raw_entry2,
+    }  # type: ignore[typeddict-item]
+
+    # Get history - should NOT include orphan entry as first item
+    entries, _ = client.history("test-key", None, None)
+
+    # Should have 2 entries (v2 and test_data), NOT 3 (orphan + v2 + test_data)
+    assert len(entries) == 2
+    assert entries[0].value == {"value": "v2"}
+    assert entries[1].value == {"value": "test_data"}
 
 
 def test_with_codec_creates_client_with_different_codec(
