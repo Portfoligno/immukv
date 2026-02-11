@@ -735,9 +735,7 @@ class ImmuKVClient(Generic[K, V]):
             sequence: Sequence[K] = sequence_from_json(get_int(data, "sequence"))
 
             # Create raw entry from latest log data (no value decoding)
-            latest_entry: RawEntry[K] = raw_entry_from_log(
-                data, current_version_id
-            )
+            latest_entry: RawEntry[K] = raw_entry_from_log(data, current_version_id)
 
             # Try to repair orphan
             can_write, orphan_status = self._repair_orphan(latest_entry)

@@ -135,9 +135,7 @@ def entry_from_log(
     )
 
 
-def raw_entry_from_log(
-    data: Dict[str, JSONValue], version_id: LogVersionId[K]
-) -> RawEntry[K]:
+def raw_entry_from_log(data: Dict[str, JSONValue], version_id: LogVersionId[K]) -> RawEntry[K]:
     """Construct RawEntry from log JSON data with explicit version_id.
 
     Identical to entry_from_log but without the value_decoder parameter —
