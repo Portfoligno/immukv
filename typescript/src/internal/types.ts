@@ -6,7 +6,7 @@ import * as crypto from 'crypto';
 import type { JSONValue } from '../jsonHelpers';
 import { stringifyCanonical } from './jsonHelpers';
 // Re-export these from parent for internal use
-import type { Entry, Hash, Sequence, TimestampMs } from '../types';
+import type { Hash, KeyObjectETag, LogVersionId, Sequence, TimestampMs } from '../types';
 
 // Generic branding utilities
 
@@ -32,15 +32,31 @@ export interface LogEntryForHash<K extends string = string, V = any> {
 }
 
 /**
+ * Raw log entry with value kept as JSONValue (no decode).
+ * Internal-only — used by getLatestAndRepair/repairOrphan to avoid invoking the value decoder.
+ */
+export interface RawLogEntry<K extends string = string> {
+  key: K;
+  value: JSONValue;
+  timestampMs: TimestampMs<K>;
+  versionId: LogVersionId<K>;
+  sequence: Sequence<K>;
+  previousVersionId?: LogVersionId<K>;
+  hash: Hash<K>;
+  previousHash: Hash<K>;
+  previousKeyObjectEtag?: KeyObjectETag<K>;
+}
+
+/**
  * Orphan status tracking.
  */
-export interface OrphanStatus<K extends string = string, V = any> {
+export interface OrphanStatus<K extends string = string> {
   /** True if latest entry is orphaned */
   isOrphaned: boolean;
   /** Key name of the orphaned entry (if orphaned) */
   orphanKey?: K;
-  /** Full entry data (if orphaned) */
-  orphanEntry?: Entry<K, V>;
+  /** Full entry data (if orphaned) — raw JSONValue, not decoded */
+  orphanEntry?: RawLogEntry<K>;
   /** Timestamp when this check was performed */
   checkedAt: number;
 }

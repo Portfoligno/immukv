@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ImmuKVClient } from '../src/client';
 import { Config, KeyNotFoundError } from '../src/types';
 import { JSONValue, ValueDecoder, ValueEncoder } from '../src/jsonHelpers';
+import type { RawLogEntry } from '../src/internal/types';
 
 const integrationTestEnabled = process.env.IMMUKV_INTEGRATION_TEST === 'true';
 
@@ -446,10 +447,21 @@ describe('ImmuKVClient', () => {
       // Set read-only mode so orphan fallback would be checked
       client['canWrite'] = false;
 
+      const rawEntry: RawLogEntry<string> = {
+        key: entry.key,
+        value: entry.value as JSONValue,
+        timestampMs: entry.timestampMs,
+        versionId: entry.versionId,
+        sequence: entry.sequence,
+        previousVersionId: entry.previousVersionId,
+        hash: entry.hash,
+        previousHash: entry.previousHash,
+        previousKeyObjectEtag: entry.previousKeyObjectEtag,
+      };
       client['latestOrphanStatus'] = {
         isOrphaned: false, // Explicitly false - repair completed
         orphanKey: 'nonexistent-key',
-        orphanEntry: entry,
+        orphanEntry: rawEntry,
         checkedAt: 0,
       };
 
@@ -469,10 +481,21 @@ describe('ImmuKVClient', () => {
       client['canWrite'] = false;
 
       // Simulate orphan status with isOrphaned=true for a nonexistent key
+      const rawEntry: RawLogEntry<string> = {
+        key: entry.key,
+        value: entry.value as JSONValue,
+        timestampMs: entry.timestampMs,
+        versionId: entry.versionId,
+        sequence: entry.sequence,
+        previousVersionId: entry.previousVersionId,
+        hash: entry.hash,
+        previousHash: entry.previousHash,
+        previousKeyObjectEtag: entry.previousKeyObjectEtag,
+      };
       client['latestOrphanStatus'] = {
         isOrphaned: true, // Explicitly true - orphan exists
         orphanKey: 'orphaned-key',
-        orphanEntry: entry,
+        orphanEntry: rawEntry,
         checkedAt: 0,
       };
 
@@ -491,10 +514,21 @@ describe('ImmuKVClient', () => {
       const entry2 = await client.set('test-key', { value: 'v2' });
 
       // Set orphan status with isOrphaned=false
+      const rawEntry2: RawLogEntry<string> = {
+        key: entry2.key,
+        value: entry2.value as JSONValue,
+        timestampMs: entry2.timestampMs,
+        versionId: entry2.versionId,
+        sequence: entry2.sequence,
+        previousVersionId: entry2.previousVersionId,
+        hash: entry2.hash,
+        previousHash: entry2.previousHash,
+        previousKeyObjectEtag: entry2.previousKeyObjectEtag,
+      };
       client['latestOrphanStatus'] = {
         isOrphaned: false, // Explicitly false
         orphanKey: 'test-key',
-        orphanEntry: entry2,
+        orphanEntry: rawEntry2,
         checkedAt: 0,
       };
 
@@ -513,10 +547,21 @@ describe('ImmuKVClient', () => {
       const entry2 = await client.set('test-key', { value: 'v2' });
 
       // Set orphan status with isOrphaned=true
+      const rawEntry2: RawLogEntry<string> = {
+        key: entry2.key,
+        value: entry2.value as JSONValue,
+        timestampMs: entry2.timestampMs,
+        versionId: entry2.versionId,
+        sequence: entry2.sequence,
+        previousVersionId: entry2.previousVersionId,
+        hash: entry2.hash,
+        previousHash: entry2.previousHash,
+        previousKeyObjectEtag: entry2.previousKeyObjectEtag,
+      };
       client['latestOrphanStatus'] = {
         isOrphaned: true, // Explicitly true
         orphanKey: 'test-key',
-        orphanEntry: entry2,
+        orphanEntry: rawEntry2,
         checkedAt: 0,
       };
 
@@ -537,10 +582,21 @@ describe('ImmuKVClient', () => {
       const entry = await client.set('test-key', { value: 'test_data' });
 
       // Set orphan status with isOrphaned=undefined (missing field)
+      const rawEntry: RawLogEntry<string> = {
+        key: entry.key,
+        value: entry.value as JSONValue,
+        timestampMs: entry.timestampMs,
+        versionId: entry.versionId,
+        sequence: entry.sequence,
+        previousVersionId: entry.previousVersionId,
+        hash: entry.hash,
+        previousHash: entry.previousHash,
+        previousKeyObjectEtag: entry.previousKeyObjectEtag,
+      };
       client['latestOrphanStatus'] = {
         isOrphaned: undefined, // Explicitly undefined
         orphanKey: 'nonexistent-key',
-        orphanEntry: entry,
+        orphanEntry: rawEntry,
       } as any;
 
       // get() on nonexistent key should throw KeyNotFoundError

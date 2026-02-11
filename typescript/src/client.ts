@@ -17,7 +17,7 @@ import type { JSONValue, ValueDecoder, ValueEncoder } from './jsonHelpers';
 import { BrandedS3Client } from './internal/s3Client';
 import { readBodyAsJson } from './internal/s3Helpers';
 import { stringifyCanonical } from './internal/jsonHelpers';
-import type { LogEntryForHash, OrphanStatus } from './internal/types';
+import type { LogEntryForHash, OrphanStatus, RawLogEntry } from './internal/types';
 import {
   hashCompute,
   hashFromJson,
@@ -48,7 +48,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
   private valueEncoder: ValueEncoder<V>;
   private lastRepairCheckMs: number = 0;
   private canWrite?: boolean;
-  private latestOrphanStatus?: OrphanStatus<K, V>;
+  private latestOrphanStatus?: OrphanStatus<K>;
 
   constructor(config: Config, valueDecoder: ValueDecoder<V>, valueEncoder: ValueEncoder<V>) {
     this.config = {
@@ -269,7 +269,11 @@ export class ImmuKVClient<K extends string = string, V = any> {
           this.latestOrphanStatus.orphanEntry !== undefined &&
           (this.canWrite === false || this.config.readOnly === true)
         ) {
-          return this.latestOrphanStatus.orphanEntry;
+          const raw = this.latestOrphanStatus.orphanEntry;
+          return {
+            ...raw,
+            value: this.valueDecoder(raw.value),
+          };
         }
         throw new KeyNotFoundError(`Key '${key}' not found`);
       }
@@ -338,7 +342,11 @@ export class ImmuKVClient<K extends string = string, V = any> {
       this.latestOrphanStatus.orphanEntry !== undefined
     ) {
       prependOrphan = true;
-      entries.push(this.latestOrphanStatus.orphanEntry);
+      const raw = this.latestOrphanStatus.orphanEntry;
+      entries.push({
+        ...raw,
+        value: this.valueDecoder(raw.value),
+      });
     }
 
     let lastKeyVersionId: KeyVersionId<K> | undefined = undefined;
@@ -618,7 +626,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
     prevHash: Hash<K>;
     sequence?: Sequence<K>;
     canWrite?: boolean;
-    orphanStatus?: OrphanStatus<K, V>;
+    orphanStatus?: OrphanStatus<K>;
   }> {
     try {
       const response = await this.s3.getObject({
@@ -630,9 +638,9 @@ export class ImmuKVClient<K extends string = string, V = any> {
       const currentVersionId = response.VersionId as LogVersionId<K>;
       const data = await readBodyAsJson(response.Body);
 
-      const latestEntry: Entry<K, V> = {
+      const latestEntry: RawLogEntry<K> = {
         key: data.key as K,
-        value: this.valueDecoder(data.value),
+        value: data.value,
         timestampMs: timestampFromJson(data.timestamp_ms as number),
         versionId: currentVersionId,
         sequence: sequenceFromJson(data.sequence as number),
@@ -670,8 +678,8 @@ export class ImmuKVClient<K extends string = string, V = any> {
   }
 
   private async repairOrphan(
-    latestLog: Entry<K, V>
-  ): Promise<[boolean | undefined, OrphanStatus<K, V> | undefined]> {
+    latestLog: RawLogEntry<K>
+  ): Promise<[boolean | undefined, OrphanStatus<K> | undefined]> {
     if (this.config.readOnly === true || this.canWrite === false) {
       const keyPath = S3KeyPaths.forKey(this.config.s3Prefix, latestLog.key);
       try {
@@ -707,11 +715,10 @@ export class ImmuKVClient<K extends string = string, V = any> {
     const currentTimeMs = Date.now();
     const keyPath = S3KeyPaths.forKey(this.config.s3Prefix, latestLog.key);
 
-    // Encode value back to JSON for repair
     const repairData = {
       sequence: latestLog.sequence,
       key: latestLog.key,
-      value: this.valueEncoder(latestLog.value),
+      value: latestLog.value,
       timestamp_ms: latestLog.timestampMs,
       log_version_id: latestLog.versionId,
       hash: latestLog.hash,

@@ -17,6 +17,7 @@ from immukv._internal.json_helpers import (
     entry_from_log,
     get_int,
     get_str,
+    raw_entry_from_log,
     strip_none_values,
 )
 from immukv._internal.types import (
@@ -26,6 +27,7 @@ from immukv._internal.types import (
     LogEntryDict,
     LogEntryForHash,
     OrphanStatus,
+    RawEntry,
     hash_compute,
     hash_from_json,
     hash_genesis,
@@ -83,7 +85,7 @@ class ImmuKVClient(Generic[K, V]):
     _value_encoder: ValueEncoder[V]
     _last_repair_check_ms: int
     _can_write: Optional[bool]
-    _latest_orphan_status: Optional[OrphanStatus[K, V]]
+    _latest_orphan_status: Optional[OrphanStatus[K]]
 
     def __init__(
         self, config: Config, value_decoder: ValueDecoder[V], value_encoder: ValueEncoder[V]
@@ -122,7 +124,7 @@ class ImmuKVClient(Generic[K, V]):
         self._log_key = cast(S3KeyPath[LogKey], S3KeyPaths.for_log(config.s3_prefix))
         self._last_repair_check_ms = 0  # In-memory timestamp tracking
         self._can_write: Optional[bool] = None  # Permission cache
-        self._latest_orphan_status: Optional[OrphanStatus[K, V]] = None  # Orphan detection cache
+        self._latest_orphan_status: Optional[OrphanStatus[K]] = None  # Orphan detection cache
 
     def set(self, key: K, value: V) -> Entry[K, V]:
         """Write new entry (two-phase: pre-flight repair, log, key object).
@@ -358,8 +360,20 @@ class ImmuKVClient(Generic[K, V]):
                     and self._latest_orphan_status.get("orphan_entry") is not None
                     and (self._can_write is False or self._config.read_only)
                 ):
-                    # Return cached orphan entry (read-only mode)
-                    return self._latest_orphan_status["orphan_entry"]  # type: ignore
+                    # Return cached orphan entry (read-only mode) — decode on demand
+                    raw = self._latest_orphan_status["orphan_entry"]
+                    assert raw is not None
+                    return Entry(
+                        key=raw.key,
+                        value=self._value_decoder(raw.value),
+                        timestamp_ms=raw.timestamp_ms,
+                        version_id=raw.version_id,
+                        sequence=raw.sequence,
+                        previous_version_id=raw.previous_version_id,
+                        hash=raw.hash,
+                        previous_hash=raw.previous_hash,
+                        previous_key_object_etag=raw.previous_key_object_etag,
+                    )
 
                 raise KeyNotFoundError(f"Key '{key}' not found")
             else:
@@ -407,7 +421,21 @@ class ImmuKVClient(Generic[K, V]):
             and self._latest_orphan_status.get("orphan_entry") is not None
         ):
             prepend_orphan = True
-            entries.append(self._latest_orphan_status["orphan_entry"])  # type: ignore
+            raw = self._latest_orphan_status["orphan_entry"]
+            assert raw is not None
+            entries.append(
+                Entry(
+                    key=raw.key,
+                    value=self._value_decoder(raw.value),
+                    timestamp_ms=raw.timestamp_ms,
+                    version_id=raw.version_id,
+                    sequence=raw.sequence,
+                    previous_version_id=raw.previous_version_id,
+                    hash=raw.hash,
+                    previous_hash=raw.previous_hash,
+                    previous_key_object_etag=raw.previous_key_object_etag,
+                )
+            )
 
         # List versions of key object
         try:
@@ -684,7 +712,7 @@ class ImmuKVClient(Generic[K, V]):
         """
         return hash_compute(entry_for_hash)
 
-    def _get_latest_and_repair(self) -> LatestLogState[K, V]:
+    def _get_latest_and_repair(self) -> LatestLogState[K]:
         """Get latest log state and repair orphaned entry if needed.
 
         Returns dict with:
@@ -706,9 +734,9 @@ class ImmuKVClient(Generic[K, V]):
             prev_hash: Hash[K] = hash_from_json(get_str(data, "hash"))
             sequence: Sequence[K] = sequence_from_json(get_int(data, "sequence"))
 
-            # Create entry from latest log data
-            latest_entry: Entry[K, V] = entry_from_log(
-                data, current_version_id, self._value_decoder
+            # Create raw entry from latest log data (no value decoding)
+            latest_entry: RawEntry[K] = raw_entry_from_log(
+                data, current_version_id
             )
 
             # Try to repair orphan
@@ -737,8 +765,8 @@ class ImmuKVClient(Generic[K, V]):
             raise
 
     def _repair_orphan(
-        self, latest_log: Entry[K, V]
-    ) -> Tuple[Optional[bool], Optional[OrphanStatus[K, V]]]:
+        self, latest_log: RawEntry[K]
+    ) -> Tuple[Optional[bool], Optional[OrphanStatus[K]]]:
         """Repair orphaned log entry by propagating to key object.
 
         Uses stored previous ETag from log entry for idempotent conditional write.
@@ -756,7 +784,7 @@ class ImmuKVClient(Generic[K, V]):
             try:
                 self._s3.head_object(bucket=self._config.s3_bucket, key=key_path)
                 # Key object exists - not orphaned
-                orphan_status: OrphanStatus[K, V] = {
+                orphan_status: OrphanStatus[K] = {
                     "is_orphaned": False,
                     "orphan_key": None,
                     "orphan_entry": None,
@@ -778,11 +806,11 @@ class ImmuKVClient(Generic[K, V]):
         current_time_ms = int(time.time() * 1000)
         key_path = S3KeyPaths.for_key(self._config.s3_prefix, latest_log.key)
 
-        # Prepare repair data - encode value back to JSON
+        # Prepare repair data - use raw JSON value directly (no encode/decode round-trip)
         repair_data: KeyObjectDict = {
             "sequence": latest_log.sequence,
             "key": latest_log.key,
-            "value": self._value_encoder(latest_log.value),
+            "value": latest_log.value,
             "timestamp_ms": latest_log.timestamp_ms,
             "log_version_id": latest_log.version_id,
             "hash": latest_log.hash,

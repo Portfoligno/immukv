@@ -3,7 +3,7 @@
 import json
 from typing import Callable, Dict, Optional, TypeVar, cast
 
-from immukv._internal.types import hash_from_json, sequence_from_json, timestamp_from_json
+from immukv._internal.types import RawEntry, hash_from_json, sequence_from_json, timestamp_from_json
 from immukv.json_helpers import JSONValue
 from immukv.types import Entry, KeyObjectETag, LogVersionId
 
@@ -121,6 +121,38 @@ def entry_from_log(
     return Entry(
         key=cast(K, get_str(data, "key")),
         value=value,
+        timestamp_ms=timestamp_from_json(get_int(data, "timestamp_ms")),
+        version_id=version_id,
+        sequence=sequence_from_json(get_int(data, "sequence")),
+        previous_version_id=(
+            LogVersionId(prev_version_id_str) if prev_version_id_str is not None else None
+        ),
+        hash=hash_from_json(get_str(data, "hash")),
+        previous_hash=hash_from_json(get_str(data, "previous_hash")),
+        previous_key_object_etag=(
+            KeyObjectETag(prev_key_etag_str) if prev_key_etag_str is not None else None
+        ),
+    )
+
+
+def raw_entry_from_log(
+    data: Dict[str, JSONValue], version_id: LogVersionId[K]
+) -> RawEntry[K]:
+    """Construct RawEntry from log JSON data with explicit version_id.
+
+    Identical to entry_from_log but without the value_decoder parameter —
+    keeps the value as raw JSONValue for internal operations.
+
+    Args:
+        data: Parsed JSON dict from S3 log entry
+        version_id: S3 version ID of the log entry
+    """
+    prev_version_id_str = get_optional_str(data, "previous_version_id")
+    prev_key_etag_str = get_optional_str(data, "previous_key_object_etag")
+
+    return RawEntry(
+        key=cast(K, get_str(data, "key")),
+        value=data["value"],
         timestamp_ms=timestamp_from_json(get_int(data, "timestamp_ms")),
         version_id=version_id,
         sequence=sequence_from_json(get_int(data, "sequence")),

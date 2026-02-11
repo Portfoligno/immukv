@@ -6,7 +6,7 @@ Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:9000 
 
 import os
 import uuid
-from typing import Generator
+from typing import Generator, cast
 
 import boto3
 import pytest
@@ -14,6 +14,7 @@ from mypy_boto3_s3.client import S3Client
 
 from immukv import Config, ImmuKVClient
 from immukv._internal.s3_client import BrandedS3Client
+from immukv._internal.types import RawEntry
 from immukv.json_helpers import JSONValue
 from immukv.types import S3Credentials, S3Overrides
 
@@ -497,10 +498,22 @@ def test_orphan_status_false_does_not_return_orphan(client: ImmuKVClient[str, ob
     # Set read-only mode so orphan fallback would be checked
     client._can_write = False
 
+    raw_entry = RawEntry(
+        key=entry.key,
+        value=cast(JSONValue, entry.value),
+        timestamp_ms=entry.timestamp_ms,
+        version_id=entry.version_id,
+        sequence=entry.sequence,
+        previous_version_id=entry.previous_version_id,
+        hash=entry.hash,
+        previous_hash=entry.previous_hash,
+        previous_key_object_etag=entry.previous_key_object_etag,
+    )
+
     client._latest_orphan_status = {
         "is_orphaned": False,  # Explicitly False - repair completed
         "orphan_key": "nonexistent-key",
-        "orphan_entry": entry,
+        "orphan_entry": raw_entry,
         "checked_at": 0,
     }
 
@@ -522,10 +535,22 @@ def test_orphan_status_true_returns_orphan_in_readonly(
     client._can_write = False
 
     # Simulate orphan status with is_orphaned=True for a nonexistent key
+    raw_entry = RawEntry(
+        key=entry.key,
+        value=cast(JSONValue, entry.value),
+        timestamp_ms=entry.timestamp_ms,
+        version_id=entry.version_id,
+        sequence=entry.sequence,
+        previous_version_id=entry.previous_version_id,
+        hash=entry.hash,
+        previous_hash=entry.previous_hash,
+        previous_key_object_etag=entry.previous_key_object_etag,
+    )
+
     client._latest_orphan_status = {
         "is_orphaned": True,  # Explicitly True - orphan exists
         "orphan_key": "orphaned-key",
-        "orphan_entry": entry,
+        "orphan_entry": raw_entry,
         "checked_at": 0,
     }
 
@@ -547,10 +572,22 @@ def test_orphan_status_false_does_not_prepend_in_history(
     entry2 = client.set("test-key", {"value": "v2"})
 
     # Set orphan status with is_orphaned=False
+    raw_entry2 = RawEntry(
+        key=entry2.key,
+        value=cast(JSONValue, entry2.value),
+        timestamp_ms=entry2.timestamp_ms,
+        version_id=entry2.version_id,
+        sequence=entry2.sequence,
+        previous_version_id=entry2.previous_version_id,
+        hash=entry2.hash,
+        previous_hash=entry2.previous_hash,
+        previous_key_object_etag=entry2.previous_key_object_etag,
+    )
+
     client._latest_orphan_status = {
         "is_orphaned": False,  # Explicitly False
         "orphan_key": "test-key",
-        "orphan_entry": entry2,
+        "orphan_entry": raw_entry2,
         "checked_at": 0,
     }
 
@@ -570,10 +607,22 @@ def test_orphan_status_true_prepends_in_history(client: ImmuKVClient[str, object
     entry2 = client.set("test-key", {"value": "v2"})
 
     # Set orphan status with is_orphaned=True
+    raw_entry2 = RawEntry(
+        key=entry2.key,
+        value=cast(JSONValue, entry2.value),
+        timestamp_ms=entry2.timestamp_ms,
+        version_id=entry2.version_id,
+        sequence=entry2.sequence,
+        previous_version_id=entry2.previous_version_id,
+        hash=entry2.hash,
+        previous_hash=entry2.previous_hash,
+        previous_key_object_etag=entry2.previous_key_object_etag,
+    )
+
     client._latest_orphan_status = {
         "is_orphaned": True,  # Explicitly True
         "orphan_key": "test-key",
-        "orphan_entry": entry2,
+        "orphan_entry": raw_entry2,
         "checked_at": 0,
     }
 

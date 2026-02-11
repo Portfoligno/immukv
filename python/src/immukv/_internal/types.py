@@ -2,14 +2,30 @@
 
 import hashlib
 import time
+from dataclasses import dataclass
 from typing import Generic, NotRequired, Optional, TypedDict, TypeVar
 
 # Re-export these from parent for internal use
 from immukv.json_helpers import JSONValue
-from immukv.types import Entry, Hash, LogVersionId, Sequence, TimestampMs
+from immukv.types import Entry, Hash, KeyObjectETag, LogVersionId, Sequence, TimestampMs
 
 K = TypeVar("K", bound=str)
 V = TypeVar("V")
+
+
+@dataclass
+class RawEntry(Generic[K]):
+    """Log entry with raw (undecoded) JSON value — for internal operations only."""
+
+    key: K
+    value: JSONValue
+    timestamp_ms: TimestampMs[K]
+    version_id: LogVersionId[K]
+    sequence: Sequence[K]
+    previous_version_id: Optional[LogVersionId[K]]
+    hash: Hash[K]
+    previous_hash: Hash[K]
+    previous_key_object_etag: Optional[KeyObjectETag[K]] = None
 
 
 class LogEntryForHash(TypedDict, Generic[K, V]):
@@ -29,22 +45,23 @@ class LogEntryForHash(TypedDict, Generic[K, V]):
     previous_hash: Hash[K]
 
 
-class OrphanStatus(TypedDict, Generic[K, V], total=False):
+class OrphanStatus(TypedDict, Generic[K], total=False):
     """Type definition for cached orphan status.
 
     Used to track whether the latest log entry is orphaned and cache
     the entry data for efficient retrieval without calling history().
 
-    Parameterized by key type K and value type V to match Entry type.
+    Parameterized by key type K. Stores RawEntry (undecoded value) to avoid
+    invoking the value decoder on cross-type entries.
     """
 
     is_orphaned: bool  # True if latest entry is orphaned
     orphan_key: Optional[K]  # Key name of the orphaned entry (if orphaned)
-    orphan_entry: Optional[Entry[K, V]]  # Full entry data (if orphaned)
+    orphan_entry: Optional[RawEntry[K]]  # Raw entry data (if orphaned)
     checked_at: int  # Timestamp when this check was performed (client-level)
 
 
-class LatestLogState(TypedDict, Generic[K, V], total=False):
+class LatestLogState(TypedDict, Generic[K], total=False):
     """Type definition for latest log state returned by _get_latest_and_repair.
 
     Contains information about the current log state and orphan repair results.
@@ -55,7 +72,7 @@ class LatestLogState(TypedDict, Generic[K, V], total=False):
     prev_hash: Hash[K]  # Previous entry hash
     sequence: Sequence[K]  # Current sequence number
     can_write: Optional[bool]  # Whether client has write permission
-    orphan_status: Optional[OrphanStatus[K, V]]  # Current orphan status
+    orphan_status: Optional[OrphanStatus[K]]  # Current orphan status
 
 
 class LogEntryDict(TypedDict):
