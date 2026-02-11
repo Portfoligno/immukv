@@ -439,7 +439,7 @@ class ImmuKVClient(Generic[K, V]):
 
         # List versions of key object
         try:
-            key_marker: Optional[str] = None
+            key_marker: Optional[str] = key_path if before_version_id is not None else None
             version_id_marker: Optional[str] = before_version_id
             last_key_version_id: Optional[KeyVersionId[K]] = None
 
@@ -516,7 +516,7 @@ class ImmuKVClient(Generic[K, V]):
         entries: List[Entry[K, V]] = []
 
         try:
-            key_marker: Optional[str] = None
+            key_marker: Optional[str] = self._log_key if before_version_id is not None else None
             version_id_marker: Optional[str] = before_version_id
 
             while True:
