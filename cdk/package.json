@@ -1,6 +1,6 @@
 {
   "name": "cdk-immukv",
-  "version": "0.1.20",
+  "version": "0.1.21-dev.0",
   "description": "AWS CDK constructs for ImmuKV - Immutable key-value store using S3 versioning",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
