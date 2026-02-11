@@ -5,6 +5,23 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.20] - 2026-02-11
+
+### Fixed
+
+- `withCodec()` / `with_codec()` clients no longer crash when the shared global log
+  contains entries written by wider-typed or differently-typed clients
+  - Internal operations (`getLatestAndRepair`, `repairOrphan`) now use raw log entries
+    that bypass the value decoder entirely
+  - Orphan repair writes the raw JSON value directly, eliminating the
+    decode-then-encode round-trip that could lose fields
+  - Orphan fallbacks in `get()` and `history()` decode on demand at the return site
+
+### Changed
+
+- CI: Version checks consolidated into a dedicated `version-check` job
+  (includes `package-lock.json` verification for TypeScript and CDK)
+
 ## [0.1.19] - 2026-02-02
 
 ### Fixed
@@ -253,6 +270,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.20]: https://github.com/Portfoligno/immukv/releases/tag/0.1.20
+[0.1.19]: https://github.com/Portfoligno/immukv/releases/tag/0.1.19
 [0.1.18]: https://github.com/Portfoligno/immukv/releases/tag/0.1.18
 [0.1.17]: https://github.com/Portfoligno/immukv/releases/tag/0.1.17
 [0.1.16]: https://github.com/Portfoligno/immukv/releases/tag/0.1.16
