@@ -7,6 +7,31 @@ on:
       - '[0-9]*.[0-9]*.[0-9]*'
 
 jobs:
+  version-check:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify all versions match tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          echo "Tag version: $TAG_VERSION"
+
+          # Check TypeScript core
+          TS_CORE=$(node -p "require('./typescript/package.json').version")
+          echo "typescript/package.json: $TS_CORE"
+          [ "$TS_CORE" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          # Check Python core
+          pip install --no-cache-dir tomli -q
+          PY_CORE=$(python -c "import tomli; print(tomli.load(open('python/pyproject.toml', 'rb'))['project']['version'])")
+          echo "python/pyproject.toml: $PY_CORE"
+          [ "$PY_CORE" = "$TAG_VERSION" ] || { echo "Mismatch!"; exit 1; }
+
+          echo "All versions match tag $TAG_VERSION"
+
   python:
     runs-on: ubuntu-latest
     container:
@@ -55,18 +80,6 @@ jobs:
         working-directory: python
         run: |
           pytest tests/test_unit.py -v
-
-      - name: Verify version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        working-directory: python
-        run: |
-          pip install --no-cache-dir tomli
-          PACKAGE_VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          TAG_VERSION=${GITHUB_REF#refs/tags/}
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
 
       - name: Build Python distribution packages
         if: startsWith(github.ref, 'refs/tags/')
@@ -134,17 +147,6 @@ jobs:
         working-directory: typescript
         run: |
           npm test
-
-      - name: Verify version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        working-directory: typescript
-        run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION=${GITHUB_REF#refs/tags/}
-          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
-            echo "Version mismatch: package=$PACKAGE_VERSION tag=$TAG_VERSION"
-            exit 1
-          fi
 
       - name: Upload TypeScript distribution artifacts
         if: startsWith(github.ref, 'refs/tags/')
@@ -338,7 +340,7 @@ jobs:
 
   ready-to-publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [python, typescript, cdk, python-integration, typescript-integration]
+    needs: [version-check, python, typescript, cdk, python-integration, typescript-integration]
     runs-on: ubuntu-latest
     steps:
       - name: All builds and integration tests passed
