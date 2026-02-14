@@ -173,7 +173,8 @@ config = Config(
     s3_prefix="",
     kms_key_id=None,  # Optional KMS encryption
     repair_check_interval_ms=300000,  # 5 minutes
-    read_only=False  # Set True to disable writes
+    read_only=False,  # Set True to disable writes
+    overrides=None  # Optional S3Overrides(endpoint_url, credentials, force_path_style)
 )
 ```
 
@@ -185,7 +186,8 @@ const config: Config = {
   s3Prefix: '',
   // kmsKeyId: 'optional-key-id',  // Optional KMS encryption
   repairCheckIntervalMs: 300000,  // 5 minutes
-  readOnly: false  // Set true to disable writes
+  readOnly: false,  // Set true to disable writes
+  // overrides: { endpointUrl?, credentials?, forcePathStyle? }
 };
 ```
 
