@@ -5,6 +5,25 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.22] - 2026-02-16
+
+### Added
+
+- CDK: OIDC federation support via `oidcProviders` prop and `federatedRole` property
+  - Generalized OIDC provider configuration (Google, GitHub, etc.)
+  - Automatic trust policy and IAM role creation
+- Credential provider support for automatic credential refresh
+  - TypeScript: `CredentialProvider` callback type (`() => Promise<StaticCredentials>`)
+  - Python: `CredentialProvider` async callback type, backed by
+    `AioDeferredRefreshableCredentials` for automatic refresh
+  - Static credentials now use `StaticCredentials` (TypeScript) / `S3Credentials` (Python)
+    with optional `sessionToken` / `aws_session_token` and `expiresAt` / `expires_at`
+- `listKeysWithPrefix()` / `list_keys_with_prefix()` for server-side key filtering by prefix
+
+### Changed
+
+- Python: Switched S3 client from boto3 to aiobotocore for native async support
+
 ## [0.1.21] - 2026-02-11
 
 ### Fixed
@@ -283,6 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.22]: https://github.com/Portfoligno/immukv/releases/tag/0.1.22
 [0.1.21]: https://github.com/Portfoligno/immukv/releases/tag/0.1.21
 [0.1.20]: https://github.com/Portfoligno/immukv/releases/tag/0.1.20
 [0.1.19]: https://github.com/Portfoligno/immukv/releases/tag/0.1.19
