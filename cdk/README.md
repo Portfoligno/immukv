@@ -23,15 +23,15 @@ pip install cdk-immukv
 #### TypeScript
 
 ```typescript
-import * as cdk from 'aws-cdk-lib';
-import { ImmuKV } from 'cdk-immukv';
+import * as cdk from "aws-cdk-lib";
+import { ImmuKV } from "cdk-immukv";
 
 const app = new cdk.App();
-const stack = new cdk.Stack(app, 'MyStack');
+const stack = new cdk.Stack(app, "MyStack");
 
-new ImmuKV(stack, 'ImmuKV', {
-  bucketName: 'my-immukv-bucket',
-  s3Prefix: 'myapp/',
+new ImmuKV(stack, "ImmuKV", {
+  bucketName: "my-immukv-bucket",
+  s3Prefix: "myapp/",
 });
 ```
 
@@ -59,24 +59,24 @@ All notification destinations can be configured using the `onLogEntryCreated` pr
 #### TypeScript - Lambda Trigger
 
 ```typescript
-import * as cdk from 'aws-cdk-lib';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
-import { ImmuKV } from 'cdk-immukv';
+import * as cdk from "aws-cdk-lib";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as s3n from "aws-cdk-lib/aws-s3-notifications";
+import { ImmuKV } from "cdk-immukv";
 
 const app = new cdk.App();
-const stack = new cdk.Stack(app, 'MyStack');
+const stack = new cdk.Stack(app, "MyStack");
 
 // Create a Lambda function
-const processorFn = new lambda.Function(stack, 'LogProcessor', {
+const processorFn = new lambda.Function(stack, "LogProcessor", {
   runtime: lambda.Runtime.PYTHON_3_11,
-  handler: 'index.handler',
-  code: lambda.Code.fromAsset('lambda'),
+  handler: "index.handler",
+  code: lambda.Code.fromAsset("lambda"),
 });
 
 // Configure ImmuKV to trigger the Lambda on log entry creation
-new ImmuKV(stack, 'ImmuKV', {
-  bucketName: 'my-immukv-bucket',
+new ImmuKV(stack, "ImmuKV", {
+  bucketName: "my-immukv-bucket",
   onLogEntryCreated: new s3n.LambdaDestination(processorFn),
 });
 ```
@@ -84,20 +84,20 @@ new ImmuKV(stack, 'ImmuKV', {
 #### TypeScript - SNS Topic
 
 ```typescript
-import * as cdk from 'aws-cdk-lib';
-import * as sns from 'aws-cdk-lib/aws-sns';
-import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
-import { ImmuKV } from 'cdk-immukv';
+import * as cdk from "aws-cdk-lib";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as s3n from "aws-cdk-lib/aws-s3-notifications";
+import { ImmuKV } from "cdk-immukv";
 
 const app = new cdk.App();
-const stack = new cdk.Stack(app, 'MyStack');
+const stack = new cdk.Stack(app, "MyStack");
 
 // Create SNS topic
-const topic = new sns.Topic(stack, 'LogEntryTopic');
+const topic = new sns.Topic(stack, "LogEntryTopic");
 
 // Configure ImmuKV to publish to SNS on log entry creation
-new ImmuKV(stack, 'ImmuKV', {
-  bucketName: 'my-immukv-bucket',
+new ImmuKV(stack, "ImmuKV", {
+  bucketName: "my-immukv-bucket",
   onLogEntryCreated: new s3n.SnsDestination(topic),
 });
 ```
@@ -105,20 +105,20 @@ new ImmuKV(stack, 'ImmuKV', {
 #### TypeScript - SQS Queue
 
 ```typescript
-import * as cdk from 'aws-cdk-lib';
-import * as sqs from 'aws-cdk-lib/aws-sqs';
-import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
-import { ImmuKV } from 'cdk-immukv';
+import * as cdk from "aws-cdk-lib";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as s3n from "aws-cdk-lib/aws-s3-notifications";
+import { ImmuKV } from "cdk-immukv";
 
 const app = new cdk.App();
-const stack = new cdk.Stack(app, 'MyStack');
+const stack = new cdk.Stack(app, "MyStack");
 
 // Create SQS queue
-const queue = new sqs.Queue(stack, 'LogEntryQueue');
+const queue = new sqs.Queue(stack, "LogEntryQueue");
 
 // Configure ImmuKV to send to SQS on log entry creation
-new ImmuKV(stack, 'ImmuKV', {
-  bucketName: 'my-immukv-bucket',
+new ImmuKV(stack, "ImmuKV", {
+  bucketName: "my-immukv-bucket",
   onLogEntryCreated: new s3n.SqsDestination(queue),
 });
 ```
@@ -151,6 +151,7 @@ ImmuKV(stack, "ImmuKV",
 ## API
 
 The `ImmuKV` construct accepts the following properties:
+
 - `bucketName` (optional): Name for the S3 bucket. If not specified, an auto-generated bucket name will be used.
 - `s3Prefix` (optional): Prefix for S3 keys
 - `onLogEntryCreated` (optional): S3 notification destination for log entry events
@@ -163,4 +164,3 @@ The `ImmuKV` construct accepts the following properties:
 ## License
 
 MIT
-

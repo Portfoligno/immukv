@@ -1,13 +1,13 @@
-import * as cdk from 'aws-cdk-lib';
-import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import { Construct } from 'constructs';
+import * as cdk from "aws-cdk-lib";
+import * as s3 from "aws-cdk-lib/aws-s3";
+import * as iam from "aws-cdk-lib/aws-iam";
+import { Construct } from "constructs";
 
 /**
  * Standard file names and patterns used by ImmuKV
  */
-const LOG_FILE_PATTERN = '_log.json';
-const KEYS_PREFIX = 'keys/';
+const LOG_FILE_PATTERN = "_log.json";
+const KEYS_PREFIX = "keys/";
 
 export interface ImmuKVProps {
   /**
@@ -141,30 +141,40 @@ export class ImmuKV extends Construct {
     const logVersionsToRetain = props?.logVersionsToRetain;
     const keyVersionRetention = props?.keyVersionRetention;
     const keyVersionsToRetain = props?.keyVersionsToRetain;
-    const s3Prefix = props?.s3Prefix ?? '';
+    const s3Prefix = props?.s3Prefix ?? "";
 
     // Validate retention parameters if provided
     if (logVersionRetention !== undefined) {
       const days = logVersionRetention.toDays();
       if (!Number.isInteger(days) || days <= 0) {
-        throw new Error('logVersionRetention must be expressible as a positive whole number of days');
+        throw new Error(
+          "logVersionRetention must be expressible as a positive whole number of days",
+        );
       }
     }
-    if (logVersionsToRetain !== undefined && (logVersionsToRetain < 0 || !Number.isInteger(logVersionsToRetain))) {
-      throw new Error('logVersionsToRetain must be a non-negative integer');
+    if (
+      logVersionsToRetain !== undefined &&
+      (logVersionsToRetain < 0 || !Number.isInteger(logVersionsToRetain))
+    ) {
+      throw new Error("logVersionsToRetain must be a non-negative integer");
     }
     if (keyVersionRetention !== undefined) {
       const days = keyVersionRetention.toDays();
       if (!Number.isInteger(days) || days <= 0) {
-        throw new Error('keyVersionRetention must be expressible as a positive whole number of days');
+        throw new Error(
+          "keyVersionRetention must be expressible as a positive whole number of days",
+        );
       }
     }
-    if (keyVersionsToRetain !== undefined && (keyVersionsToRetain < 0 || !Number.isInteger(keyVersionsToRetain))) {
-      throw new Error('keyVersionsToRetain must be a non-negative integer');
+    if (
+      keyVersionsToRetain !== undefined &&
+      (keyVersionsToRetain < 0 || !Number.isInteger(keyVersionsToRetain))
+    ) {
+      throw new Error("keyVersionsToRetain must be a non-negative integer");
     }
 
     // Validate s3Prefix
-    if (s3Prefix && (s3Prefix.startsWith('/') || s3Prefix.includes('..'))) {
+    if (s3Prefix && (s3Prefix.startsWith("/") || s3Prefix.includes(".."))) {
       throw new Error('s3Prefix must not start with "/" or contain ".."');
     }
 
@@ -172,9 +182,12 @@ export class ImmuKV extends Construct {
     const lifecycleRules: s3.LifecycleRule[] = [];
 
     // Add log lifecycle rule if any retention parameter is specified
-    if (logVersionRetention !== undefined || logVersionsToRetain !== undefined) {
+    if (
+      logVersionRetention !== undefined ||
+      logVersionsToRetain !== undefined
+    ) {
       lifecycleRules.push({
-        id: 'delete-old-log-versions',
+        id: "delete-old-log-versions",
         enabled: true,
         noncurrentVersionExpiration: logVersionRetention,
         noncurrentVersionsToRetain: logVersionsToRetain,
@@ -183,9 +196,12 @@ export class ImmuKV extends Construct {
     }
 
     // Add key lifecycle rule if any retention parameter is specified
-    if (keyVersionRetention !== undefined || keyVersionsToRetain !== undefined) {
+    if (
+      keyVersionRetention !== undefined ||
+      keyVersionsToRetain !== undefined
+    ) {
       lifecycleRules.push({
-        id: 'delete-old-key-versions',
+        id: "delete-old-key-versions",
         enabled: true,
         noncurrentVersionExpiration: keyVersionRetention,
         noncurrentVersionsToRetain: keyVersionsToRetain,
@@ -194,7 +210,7 @@ export class ImmuKV extends Construct {
     }
 
     // S3 Bucket with versioning
-    this.bucket = new s3.Bucket(this, 'ImmuKVBucket', {
+    this.bucket = new s3.Bucket(this, "ImmuKVBucket", {
       bucketName: props?.bucketName,
       versioned: true,
       encryption: props?.useKmsEncryption
@@ -206,34 +222,38 @@ export class ImmuKV extends Construct {
     });
 
     // IAM Policy for read/write access (Lambda, EC2, ECS, etc.)
-    this.readWritePolicy = new iam.ManagedPolicy(this, 'ImmuKVReadWritePolicy', {
-      statements: [
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: [
-            's3:GetObject',
-            's3:GetObjectVersion',
-            's3:PutObject',
-            's3:ListBucket',
-            's3:ListBucketVersions',
-            's3:HeadObject',
-          ],
-          resources: [this.bucket.bucketArn, `${this.bucket.bucketArn}/*`],
-        }),
-      ],
-    });
+    this.readWritePolicy = new iam.ManagedPolicy(
+      this,
+      "ImmuKVReadWritePolicy",
+      {
+        statements: [
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: [
+              "s3:GetObject",
+              "s3:GetObjectVersion",
+              "s3:PutObject",
+              "s3:ListBucket",
+              "s3:ListBucketVersions",
+              "s3:HeadObject",
+            ],
+            resources: [this.bucket.bucketArn, `${this.bucket.bucketArn}/*`],
+          }),
+        ],
+      },
+    );
 
     // IAM Policy for read-only devices (sensors, IoT devices, etc.)
-    this.readOnlyPolicy = new iam.ManagedPolicy(this, 'ImmuKVReadOnlyPolicy', {
+    this.readOnlyPolicy = new iam.ManagedPolicy(this, "ImmuKVReadOnlyPolicy", {
       statements: [
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: [
-            's3:GetObject',
-            's3:GetObjectVersion',
-            's3:ListBucket',
-            's3:ListBucketVersions',
-            's3:HeadObject',
+            "s3:GetObject",
+            "s3:GetObjectVersion",
+            "s3:ListBucket",
+            "s3:ListBucketVersions",
+            "s3:HeadObject",
           ],
           resources: [this.bucket.bucketArn, `${this.bucket.bucketArn}/*`],
         }),
@@ -245,9 +265,8 @@ export class ImmuKV extends Construct {
       this.bucket.addEventNotification(
         s3.EventType.OBJECT_CREATED,
         props.onLogEntryCreated,
-        { prefix: `${s3Prefix}${LOG_FILE_PATTERN}` }
+        { prefix: `${s3Prefix}${LOG_FILE_PATTERN}` },
       );
     }
   }
 }
-

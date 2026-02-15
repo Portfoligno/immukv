@@ -2,5 +2,4 @@
  * AWS CDK constructs for ImmuKV
  */
 
-export * from './immukv';
-
+export * from "./immukv";
