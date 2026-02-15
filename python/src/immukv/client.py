@@ -1,15 +1,18 @@
 """ImmuKV client implementation."""
 
+import asyncio
 import json
 import logging
+import threading
 import time
+from collections.abc import Coroutine
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar, cast
 
-import boto3
 from botocore.exceptions import ClientError
 
 if TYPE_CHECKING:
-    from mypy_boto3_s3.client import S3Client
+    from types_aiobotocore_s3.client import S3Client
 
 from immukv._internal.json_helpers import (
     dumps_canonical,
@@ -67,6 +70,7 @@ K = TypeVar("K", bound=str)
 K2 = TypeVar("K2", bound=str)
 V = TypeVar("V")
 V2 = TypeVar("V2")
+_T = TypeVar("_T")
 
 
 class ImmuKVClient(Generic[K, V]):
@@ -79,7 +83,11 @@ class ImmuKVClient(Generic[K, V]):
 
     # Instance field type annotations
     _config: Config
+    _loop: asyncio.AbstractEventLoop
+    _thread: threading.Thread
+    _exit_stack: AsyncExitStack
     _s3: BrandedS3Client
+    _owns_loop: bool
     _log_key: S3KeyPath[LogKey]
     _value_decoder: ValueDecoder[V]
     _value_encoder: ValueEncoder[V]
@@ -101,7 +109,7 @@ class ImmuKVClient(Generic[K, V]):
         self._value_decoder = value_decoder
         self._value_encoder = value_encoder
 
-        # Build boto3 client parameters
+        # Build aiobotocore client parameters
         client_params: dict[str, object] = {
             "region_name": config.s3_region,
         }
@@ -119,12 +127,43 @@ class ImmuKVClient(Generic[K, V]):
 
                 client_params["config"] = BotocoreConfig(s3={"addressing_style": "path"})
 
-        raw_s3: "S3Client" = boto3.client("s3", **client_params)  # type: ignore[assignment,call-overload]
-        self._s3 = BrandedS3Client(raw_s3)
+        # Start background IO thread
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(
+            target=self._loop.run_forever, name="immukv-io", daemon=True
+        )
+        self._thread.start()
+        self._owns_loop = True
+
+        # Create aiobotocore client on the background loop
+        aio_client, self._exit_stack = self._run_on_loop(self._create_aio_client(client_params))
+        self._s3 = BrandedS3Client(aio_client, self._loop)
         self._log_key = cast(S3KeyPath[LogKey], S3KeyPaths.for_log(config.s3_prefix))
         self._last_repair_check_ms = 0  # In-memory timestamp tracking
         self._can_write: Optional[bool] = None  # Permission cache
         self._latest_orphan_status: Optional[OrphanStatus[K]] = None  # Orphan detection cache
+
+    def _run_on_loop(self, coro: Coroutine[object, object, _T]) -> _T:
+        """Submit coroutine to background loop, block for result.
+
+        Used only for lifecycle operations (create client, close).
+        All S3 operations go through BrandedS3Client._run.
+        """
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
+
+    @staticmethod
+    async def _create_aio_client(
+        client_params: dict[str, object],
+    ) -> tuple["S3Client", AsyncExitStack]:
+        import aiobotocore.session
+
+        stack = AsyncExitStack()
+        session = aiobotocore.session.get_session()
+        client: "S3Client" = await stack.enter_async_context(
+            session.create_client("s3", **client_params)  # type: ignore[call-overload,misc]
+        )
+        return client, stack
 
     def set(self, key: K, value: V) -> Entry[K, V]:
         """Write new entry (two-phase: pre-flight repair, log, key object).
@@ -171,7 +210,7 @@ class ImmuKVClient(Generic[K, V]):
             try:
                 current_key = self._s3.head_object(bucket=self._config.s3_bucket, key=key_path)
                 current_key_etag = HeadObjectOutputs.key_object_etag(current_key)
-            except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
+            except ClientError as e:  # type: ignore[misc]
                 if get_error_code(e) in ["NoSuchKey", "404"]:
                     current_key_etag = None
                 else:
@@ -240,7 +279,7 @@ class ImmuKVClient(Generic[K, V]):
                 new_log_version_id: LogVersionId[K] = new_log_version_id_opt
                 break  # ✅ Committed to log! Exit retry loop
 
-            except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
+            except ClientError as e:  # type: ignore[misc]
                 if get_error_code(e) == "PreconditionFailed":
                     last_error = e
                     logger.debug(f"Log write conflict, retry {attempt + 1}/{max_retries}")
@@ -444,7 +483,7 @@ class ImmuKVClient(Generic[K, V]):
             last_key_version_id: Optional[KeyVersionId[K]] = None
 
             while True:
-                list_params: Dict[str, Any] = {  # type: ignore[misc,explicit-any]
+                list_params: Dict[str, Any] = {  # type: ignore[explicit-any]
                     "bucket": self._config.s3_bucket,
                     "prefix": key_path,
                 }
@@ -520,7 +559,7 @@ class ImmuKVClient(Generic[K, V]):
             version_id_marker: Optional[str] = before_version_id
 
             while True:
-                list_params: Dict[str, Any] = {  # type: ignore[misc,explicit-any]
+                list_params: Dict[str, Any] = {  # type: ignore[explicit-any]
                     "bucket": self._config.s3_bucket,
                     "prefix": self._log_key,
                 }
@@ -581,27 +620,27 @@ class ImmuKVClient(Generic[K, V]):
         """
         keys: List[K] = []
         prefix = f"{self._config.s3_prefix}keys/"
+        start_after = f"{prefix}{after_key}.json" if after_key is not None else prefix
 
         try:
-            paginator = self._s3.get_paginator("list_objects_v2")
-            page_iterator = paginator.paginate(  # type: ignore[misc]
-                Bucket=self._config.s3_bucket,
-                Prefix=prefix,
-                StartAfter=f"{prefix}{after_key}.json" if after_key is not None else prefix,
-            )
-
-            for page in page_iterator:  # type: ignore[misc]
-                contents = page.get("Contents", [])  # type: ignore[misc]
-                for obj in contents:  # type: ignore[misc]
-                    # Extract key name from path
-                    key_name_str = cast(str, obj["Key"])[len(prefix) :]  # type: ignore[misc]
+            continuation_token: Optional[str] = None
+            while True:
+                page = self._s3.list_objects_v2(
+                    bucket=self._config.s3_bucket,
+                    prefix=prefix,
+                    start_after=start_after if continuation_token is None else None,
+                    continuation_token=continuation_token,
+                )
+                contents = page.get("Contents") or []
+                for obj in contents:
+                    key_name_str = obj["Key"][len(prefix) :]
                     if key_name_str.endswith(".json"):
-                        key_name_str = key_name_str[:-5]
-                        keys.append(cast(K, key_name_str))  # type: ignore[misc]
-
-                        # Check limit
+                        keys.append(cast(K, key_name_str[:-5]))
                         if limit is not None and len(keys) >= limit:
                             return keys
+                if not page["IsTruncated"]:
+                    break
+                continuation_token = page.get("NextContinuationToken")
 
         except ClientError:  # type: ignore[misc]
             return []
@@ -689,7 +728,7 @@ class ImmuKVClient(Generic[K, V]):
             version_id_marker: Optional[str] = None
 
             while True:
-                list_params: Dict[str, Any] = {  # type: ignore[misc,explicit-any]
+                list_params: Dict[str, Any] = {  # type: ignore[explicit-any]
                     "bucket": self._config.s3_bucket,
                     "prefix": self._log_key,
                 }
@@ -744,24 +783,33 @@ class ImmuKVClient(Generic[K, V]):
         Note: The returned client shares the underlying S3 client. Closing either client
         (via close() or context manager) will close the shared connection, affecting both.
         """
-        new_client: ImmuKVClient[K2, V2] = object.__new__(ImmuKVClient)  # type: ignore[type-var]
+        new_client: ImmuKVClient[K2, V2] = object.__new__(ImmuKVClient)
         # Share immutable fields
         new_client._config = self._config
-        new_client._s3 = self._s3
+        new_client._s3 = self._s3  # shared (holds loop ref internally)
+        new_client._loop = self._loop  # shared for lifecycle
+        new_client._thread = self._thread  # shared
+        new_client._exit_stack = self._exit_stack  # shared
+        new_client._owns_loop = False  # does NOT own cleanup
         new_client._log_key = self._log_key
         # Set new codec
-        new_client._value_decoder = value_decoder  # type: ignore[assignment]
-        new_client._value_encoder = value_encoder  # type: ignore[assignment]
+        new_client._value_decoder = value_decoder
+        new_client._value_encoder = value_encoder
         # Initialize mutable state
         new_client._last_repair_check_ms = 0
         new_client._can_write = None
         new_client._latest_orphan_status = None
-        return new_client  # type: ignore[return-value]
+        return new_client
 
     def close(self) -> None:
         """Close client and cleanup resources."""
-        # boto3 clients don't need explicit cleanup
-        pass
+        if not self._owns_loop:
+            return  # with_codec() fork -- don't clean up shared resources
+
+        self._run_on_loop(self._exit_stack.aclose())
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5)
+        self._loop.close()
 
     def __enter__(self) -> "ImmuKVClient[K, V]":
         """Context manager entry."""
@@ -869,7 +917,7 @@ class ImmuKVClient(Generic[K, V]):
                     "checked_at": int(time.time() * 1000),
                 }
                 return (self._can_write, orphan_status)
-            except ClientError as e:  # type: ignore[misc]  # type: ignore[misc]
+            except ClientError as e:  # type: ignore[misc]
                 if get_error_code(e) in ["NoSuchKey", "404"]:
                     # Key object missing - orphaned
                     orphan_status = {

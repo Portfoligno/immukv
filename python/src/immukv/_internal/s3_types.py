@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Generic, List, TypedDict, TypeVar, Optional
 from immukv.types import KeyObjectETag, KeyVersionId, LogVersionId
 
 if TYPE_CHECKING:
-    from mypy_boto3_s3.type_defs import (
+    from types_aiobotocore_s3.type_defs import (
         GetObjectOutputTypeDef,
         HeadObjectOutputTypeDef,
         ListObjectVersionsOutputTypeDef,
@@ -25,7 +25,7 @@ T = TypeVar("T")
 def assert_aws_field_present(value: Optional[T], field_name: str) -> T:
     """Assert that a field marked optional by AWS SDK types is actually present.
 
-    The boto3-stubs types incorrectly mark many fields as optional when they
+    The aiobotocore type stubs incorrectly mark many fields as optional when they
     are always returned by AWS. This helper asserts that fields which are
     always returned by AWS are actually present at runtime.
 
@@ -57,7 +57,7 @@ class S3KeyPath(str, Generic[K]):
     """S3 path string carrying the key type K for type safety."""
 
     def __new__(cls, value: str) -> "S3KeyPath[K]":
-        return str.__new__(cls, value)  # type: ignore[return-value]
+        return str.__new__(cls, value)
 
 
 class S3KeyPaths:
@@ -95,7 +95,7 @@ class S3KeyPaths:
 class GetObjectOutput(TypedDict, Generic[K]):
     """S3 GetObject response with corrected field optionality.
 
-    AWS SDK types are incorrect due to boto3-stubs bugs.
+    AWS SDK types are incorrect due to aiobotocore type stub bugs.
     This type reflects actual AWS API behavior per documentation.
     """
 
@@ -108,8 +108,8 @@ class GetObjectOutputs:
     """Namespace for GetObjectOutput helper functions."""
 
     @staticmethod
-    def from_boto3(response: "GetObjectOutputTypeDef") -> GetObjectOutput[K]:
-        """Convert boto3 GetObjectOutputTypeDef to our GetObjectOutput type.
+    def from_aiobotocore(response: "GetObjectOutputTypeDef") -> GetObjectOutput[K]:
+        """Convert aiobotocore GetObjectOutputTypeDef to our GetObjectOutput type.
 
         Reconstructs the response with correct field optionality, asserting
         that fields which should always be present are actually present.
@@ -135,7 +135,7 @@ class GetObjectOutputs:
 class PutObjectOutput(TypedDict, Generic[K]):
     """S3 PutObject response with corrected field optionality.
 
-    AWS SDK types are incorrect due to boto3-stubs bugs.
+    AWS SDK types are incorrect due to aiobotocore type stub bugs.
     This type reflects actual AWS API behavior per documentation.
     """
 
@@ -147,8 +147,8 @@ class PutObjectOutputs:
     """Namespace for PutObjectOutput helper functions."""
 
     @staticmethod
-    def from_boto3(response: "PutObjectOutputTypeDef") -> PutObjectOutput[K]:
-        """Convert boto3 PutObjectOutputTypeDef to our PutObjectOutput type.
+    def from_aiobotocore(response: "PutObjectOutputTypeDef") -> PutObjectOutput[K]:
+        """Convert aiobotocore PutObjectOutputTypeDef to our PutObjectOutput type.
 
         Reconstructs the response with correct field optionality, asserting
         that fields which should always be present are actually present.
@@ -173,7 +173,7 @@ class PutObjectOutputs:
 class HeadObjectOutput(TypedDict, Generic[K]):
     """S3 HeadObject response with corrected field optionality.
 
-    AWS SDK types are incorrect due to boto3-stubs bugs.
+    AWS SDK types are incorrect due to aiobotocore type stub bugs.
     This type reflects actual AWS API behavior per documentation.
     """
 
@@ -185,8 +185,8 @@ class HeadObjectOutputs:
     """Namespace for HeadObjectOutput helper functions."""
 
     @staticmethod
-    def from_boto3(response: "HeadObjectOutputTypeDef") -> HeadObjectOutput[K]:
-        """Convert boto3 HeadObjectOutputTypeDef to our HeadObjectOutput type.
+    def from_aiobotocore(response: "HeadObjectOutputTypeDef") -> HeadObjectOutput[K]:
+        """Convert aiobotocore HeadObjectOutputTypeDef to our HeadObjectOutput type.
 
         Reconstructs the response with correct field optionality, asserting
         that fields which should always be present are actually present.
@@ -211,7 +211,7 @@ class HeadObjectOutputs:
 class ObjectVersion(TypedDict, Generic[K]):
     """S3 object version with corrected field optionality.
 
-    AWS SDK types are incorrect due to boto3-stubs bugs.
+    AWS SDK types are incorrect due to aiobotocore type stub bugs.
     This type reflects actual AWS API behavior per documentation.
     """
 
@@ -225,8 +225,8 @@ class ObjectVersions:
     """Namespace for ObjectVersion helper functions."""
 
     @staticmethod
-    def from_boto3(version: "ObjectVersionTypeDef") -> ObjectVersion[K]:
-        """Convert boto3 ObjectVersionTypeDef to our ObjectVersion type.
+    def from_aiobotocore(version: "ObjectVersionTypeDef") -> ObjectVersion[K]:
+        """Convert aiobotocore ObjectVersionTypeDef to our ObjectVersion type.
 
         Reconstructs the object with correct field optionality, asserting
         that fields which should always be present are actually present.
@@ -254,7 +254,7 @@ class ObjectVersions:
 class ListObjectVersionsOutput(TypedDict, Generic[K]):
     """S3 ListObjectVersions response with corrected field optionality.
 
-    AWS SDK types are incorrect due to boto3-stubs bugs.
+    AWS SDK types are incorrect due to aiobotocore type stub bugs.
     This type reflects actual AWS API behavior per documentation.
     """
 
@@ -268,8 +268,10 @@ class ListObjectVersionsOutputs:
     """Namespace for ListObjectVersionsOutput helper functions."""
 
     @staticmethod
-    def from_boto3(response: "ListObjectVersionsOutputTypeDef") -> ListObjectVersionsOutput[K]:
-        """Convert boto3 ListObjectVersionsOutputTypeDef to our ListObjectVersionsOutput type.
+    def from_aiobotocore(
+        response: "ListObjectVersionsOutputTypeDef",
+    ) -> ListObjectVersionsOutput[K]:
+        """Convert aiobotocore ListObjectVersionsOutputTypeDef to our ListObjectVersionsOutput type.
 
         Reconstructs the response with correct field optionality, asserting
         that fields which should always be present are actually present.
@@ -280,7 +282,7 @@ class ListObjectVersionsOutputs:
                 response.get("IsTruncated"), "ListObjectVersionsOutput.IsTruncated"
             ),
             "Versions": (
-                None if versions is None else [ObjectVersions.from_boto3(v) for v in versions]
+                None if versions is None else [ObjectVersions.from_aiobotocore(v) for v in versions]
             ),
             "NextKeyMarker": response.get("NextKeyMarker"),
             "NextVersionIdMarker": response.get("NextVersionIdMarker"),
@@ -296,7 +298,7 @@ class Object(TypedDict):
 class ListObjectsV2Output(TypedDict):
     """S3 ListObjectsV2 response with corrected field optionality.
 
-    AWS SDK types are incorrect due to boto3-stubs bugs.
+    AWS SDK types are incorrect due to aiobotocore type stub bugs.
     This type reflects actual AWS API behavior per documentation.
     """
 
@@ -306,13 +308,13 @@ class ListObjectsV2Output(TypedDict):
 
 
 class ErrorResponse(TypedDict):
-    """Boto3 error response structure."""
+    """Botocore error response structure."""
 
     Code: str
     Message: str
 
 
 class ClientErrorResponse(TypedDict):
-    """Boto3 ClientError response structure."""
+    """Botocore ClientError response structure."""
 
     Error: ErrorResponse

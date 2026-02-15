@@ -9,13 +9,17 @@ Requires MinIO running and test actual S3 operations.
 Run with: IMMUKV_INTEGRATION_TEST=true IMMUKV_S3_ENDPOINT=http://localhost:9000 pytest
 """
 
+import asyncio
+import concurrent.futures
 import os
 import uuid
-from typing import Dict, Generator, TypedDict, cast
+from contextlib import AsyncExitStack
+from typing import TYPE_CHECKING, Dict, Generator, TypedDict, cast
 
-import boto3
 import pytest
-from mypy_boto3_s3.client import S3Client
+
+if TYPE_CHECKING:
+    from types_aiobotocore_s3.client import S3Client
 
 from immukv import Config, ImmuKVClient
 from immukv.json_helpers import JSONValue
@@ -105,42 +109,90 @@ def lossy_narrow_encoder(value: Dict[str, object]) -> JSONValue:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="session")  # type: ignore[misc]
-def raw_s3() -> S3Client:
-    """Create raw S3 client for bucket management operations."""
+@pytest.fixture(scope="session")
+def _aio_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Provide a background event loop for test fixtures."""
+    import threading
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, name="test-io", daemon=True)
+    thread.start()
+    yield loop
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=5)
+    loop.close()
+
+
+@pytest.fixture(scope="session")
+def raw_s3(_aio_loop: asyncio.AbstractEventLoop) -> Generator["S3Client", None, None]:
+    """Create raw aiobotocore S3 client for bucket management operations."""
+    import aiobotocore.session
+
     endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:4566")
     access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
     secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
-    return boto3.client(  # type: ignore[return-value,no-any-return,misc]
-        "s3",
-        endpoint_url=endpoint_url,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name="us-east-1",
-    )
+
+    async def _create() -> tuple["S3Client", AsyncExitStack]:
+        stack = AsyncExitStack()
+        session = aiobotocore.session.get_session()
+        client: "S3Client" = await stack.enter_async_context(
+            session.create_client(
+                "s3",
+                endpoint_url=endpoint_url,
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name="us-east-1",
+            )
+        )
+        return client, stack
+
+    future = asyncio.run_coroutine_threadsafe(_create(), _aio_loop)
+    client, stack = future.result()
+    yield client
+    future_close = asyncio.run_coroutine_threadsafe(stack.aclose(), _aio_loop)
+    future_close.result()
+
+
+def _run_sync(coro: object, loop: asyncio.AbstractEventLoop) -> dict[str, object]:
+    """Run a coroutine on the background loop, blocking until complete."""
+    future: concurrent.futures.Future[dict[str, object]] = asyncio.run_coroutine_threadsafe(coro, loop)  # type: ignore[arg-type]
+    return future.result()
 
 
 @pytest.fixture  # type: ignore[misc]
-def s3_bucket(raw_s3: S3Client) -> Generator[str, None, None]:
-    """Create unique S3 bucket for each test — ensures complete isolation."""
+def s3_bucket(
+    raw_s3: "S3Client", _aio_loop: asyncio.AbstractEventLoop
+) -> Generator[str, None, None]:
+    """Create unique S3 bucket for each test -- ensures complete isolation."""
     bucket_name = f"test-codec-{uuid.uuid4().hex[:8]}"
-    raw_s3.create_bucket(Bucket=bucket_name)
-    raw_s3.put_bucket_versioning(Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"})
+    _run_sync(raw_s3.create_bucket(Bucket=bucket_name), _aio_loop)
+    _run_sync(
+        raw_s3.put_bucket_versioning(
+            Bucket=bucket_name, VersioningConfiguration={"Status": "Enabled"}
+        ),
+        _aio_loop,
+    )
 
     yield bucket_name
 
     # Cleanup
     try:
-        response = raw_s3.list_object_versions(Bucket=bucket_name)
-        for version in response.get("Versions", []):
-            raw_s3.delete_object(
-                Bucket=bucket_name, Key=version["Key"], VersionId=version["VersionId"]
+        response = _run_sync(raw_s3.list_object_versions(Bucket=bucket_name), _aio_loop)
+        for version in response.get("Versions", []):  # type: ignore[misc,attr-defined]
+            _run_sync(
+                raw_s3.delete_object(
+                    Bucket=bucket_name, Key=version["Key"], VersionId=version["VersionId"]  # type: ignore[misc]
+                ),
+                _aio_loop,
             )
-        for marker in response.get("DeleteMarkers", []):
-            raw_s3.delete_object(
-                Bucket=bucket_name, Key=marker["Key"], VersionId=marker["VersionId"]
+        for marker in response.get("DeleteMarkers", []):  # type: ignore[misc,attr-defined]
+            _run_sync(
+                raw_s3.delete_object(
+                    Bucket=bucket_name, Key=marker["Key"], VersionId=marker["VersionId"]  # type: ignore[misc]
+                ),
+                _aio_loop,
             )
-        raw_s3.delete_bucket(Bucket=bucket_name)
+        _run_sync(raw_s3.delete_bucket(Bucket=bucket_name), _aio_loop)
     except Exception as e:
         print(f"Warning: Cleanup failed for bucket {bucket_name}: {e}")
 

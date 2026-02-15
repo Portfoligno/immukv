@@ -72,23 +72,29 @@ def test_hash_compute_changes_with_different_data() -> None:
     base_hash = hash_compute(base_data)
 
     # Change sequence
-    data_seq: LogEntryForHash[str, object] = {**base_data, "sequence": sequence_from_json(1)}  # type: ignore[misc]
+    data_seq: LogEntryForHash[str, object] = {**base_data, "sequence": sequence_from_json(1)}
     assert hash_compute(data_seq) != base_hash
 
     # Change key
-    data_key: LogEntryForHash[str, object] = {**base_data, "key": "different"}  # type: ignore[misc]
+    data_key: LogEntryForHash[str, object] = {**base_data, "key": "different"}
     assert hash_compute(data_key) != base_hash
 
     # Change value
-    data_val: LogEntryForHash[str, object] = {**base_data, "value": {"x": 2}}  # type: ignore[misc]
+    data_val: LogEntryForHash[str, object] = {**base_data, "value": {"x": 2}}
     assert hash_compute(data_val) != base_hash
 
     # Change timestamp
-    data_ts: LogEntryForHash[str, object] = {**base_data, "timestamp_ms": timestamp_from_json(2000000000000)}  # type: ignore[misc]
+    data_ts: LogEntryForHash[str, object] = {
+        **base_data,
+        "timestamp_ms": timestamp_from_json(2000000000000),
+    }
     assert hash_compute(data_ts) != base_hash
 
     # Change previous_hash
-    data_prev: LogEntryForHash[str, object] = {**base_data, "previous_hash": hash_from_json("sha256:" + "1" * 64)}  # type: ignore[misc]
+    data_prev: LogEntryForHash[str, object] = {
+        **base_data,
+        "previous_hash": hash_from_json("sha256:" + "1" * 64),
+    }
     assert hash_compute(data_prev) != base_hash
 
 

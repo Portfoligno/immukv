@@ -1,14 +1,16 @@
-"""Branded S3 client wrapper for type-safe operations.
+"""Branded S3 client wrapper for type-safe operations (aiobotocore backend).
 
 This client is not part of the public API and should only be used internally.
 """
 
+import asyncio
+from collections.abc import Coroutine
+from io import BytesIO
 from typing import TYPE_CHECKING, Literal, Optional, TypeVar
 
 if TYPE_CHECKING:
-    from mypy_boto3_s3.client import S3Client
-    from mypy_boto3_s3.paginator import ListObjectsV2Paginator
-    from mypy_boto3_s3.type_defs import (
+    from types_aiobotocore_s3.client import S3Client
+    from types_aiobotocore_s3.type_defs import (
         GetObjectRequestTypeDef,
         ListObjectVersionsRequestTypeDef,
         PutObjectRequestTypeDef,
@@ -16,30 +18,41 @@ if TYPE_CHECKING:
 
 from immukv._internal.s3_types import (
     GetObjectOutput,
-    GetObjectOutputs,
     HeadObjectOutput,
     HeadObjectOutputs,
     ListObjectVersionsOutput,
     ListObjectVersionsOutputs,
+    ListObjectsV2Output,
+    Object,
     PutObjectOutput,
     PutObjectOutputs,
     S3KeyPath,
+    assert_aws_field_present,
 )
 
 K = TypeVar("K", bound=str)
+_T = TypeVar("_T")
 
 
 class BrandedS3Client:
     """Branded S3 client wrapper returning nominally-typed responses.
 
-    Centralizes all casts from boto3's Any-containing types to our
-    clean Any-free type definitions. This allows strict mypy checking
-    (disallow_any_expr) while working with boto3.
+    Wraps an aiobotocore S3 client running on a background event loop.
+    Each method calls the async aiobotocore operation via
+    run_coroutine_threadsafe + future.result(), returning synchronous
+    results with the same branded types as the previous boto3 version.
     """
 
-    def __init__(self, s3_client: "S3Client") -> None:
-        """Initialize with a boto3 S3 client."""
+    def __init__(self, s3_client: "S3Client", loop: asyncio.AbstractEventLoop) -> None:
         self._s3 = s3_client
+        self._loop = loop
+
+    def _run(self, coro: Coroutine[object, object, _T]) -> _T:
+        """Bridge: submit coroutine to background loop, block for result."""
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
+
+    # -- GetObject ----------------------------------------------------------
 
     def get_object(
         self,
@@ -47,13 +60,33 @@ class BrandedS3Client:
         key: S3KeyPath[K],
         version_id: Optional[str] = None,
     ) -> GetObjectOutput[K]:
-        """Get object from S3."""
+        """Get object from S3 (synchronous)."""
+        return self._run(self._async_get_object(bucket, key, version_id))
+
+    async def _async_get_object(
+        self,
+        bucket: str,
+        key: S3KeyPath[K],
+        version_id: Optional[str] = None,
+    ) -> GetObjectOutput[K]:
         request: "GetObjectRequestTypeDef" = {"Bucket": bucket, "Key": key}
         if version_id is not None:
             request["VersionId"] = version_id
 
-        response = self._s3.get_object(**request)
-        return GetObjectOutputs.from_boto3(response)
+        response = await self._s3.get_object(**request)
+
+        # Read the async streaming body NOW, before returning.
+        # aiobotocore Body is async -- we read it fully and wrap in BytesIO
+        # so that downstream read_body_as_json(response["Body"]) works unchanged.
+        raw_body = await response["Body"].read()
+
+        return {
+            "Body": BytesIO(raw_body),
+            "ETag": assert_aws_field_present(response.get("ETag"), "GetObjectOutput.ETag"),
+            "VersionId": response.get("VersionId"),
+        }
+
+    # -- PutObject ----------------------------------------------------------
 
     def put_object(
         self,
@@ -66,7 +99,31 @@ class BrandedS3Client:
         server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
         sse_kms_key_id: Optional[str] = None,
     ) -> PutObjectOutput[K]:
-        """Put object to S3."""
+        """Put object to S3 (synchronous)."""
+        return self._run(
+            self._async_put_object(
+                bucket,
+                key,
+                body,
+                content_type,
+                if_match,
+                if_none_match,
+                server_side_encryption,
+                sse_kms_key_id,
+            )
+        )
+
+    async def _async_put_object(
+        self,
+        bucket: str,
+        key: S3KeyPath[K],
+        body: bytes,
+        content_type: Optional[str] = None,
+        if_match: Optional[str] = None,
+        if_none_match: Optional[str] = None,
+        server_side_encryption: Optional[Literal["AES256", "aws:kms", "aws:kms:dsse"]] = None,
+        sse_kms_key_id: Optional[str] = None,
+    ) -> PutObjectOutput[K]:
         request: "PutObjectRequestTypeDef" = {"Bucket": bucket, "Key": key, "Body": body}
         if content_type is not None:
             request["ContentType"] = content_type
@@ -79,16 +136,29 @@ class BrandedS3Client:
         if sse_kms_key_id is not None:
             request["SSEKMSKeyId"] = sse_kms_key_id
 
-        response = self._s3.put_object(**request)
-        return PutObjectOutputs.from_boto3(response)
+        response = await self._s3.put_object(**request)
+        return PutObjectOutputs.from_aiobotocore(response)
+
+    # -- HeadObject ---------------------------------------------------------
 
     def head_object(
         self,
         bucket: str,
         key: S3KeyPath[K],
     ) -> HeadObjectOutput[K]:
-        """Get object metadata from S3."""
-        return HeadObjectOutputs.from_boto3(self._s3.head_object(Bucket=bucket, Key=key))
+        """Get object metadata from S3 (synchronous)."""
+        return self._run(self._async_head_object(bucket, key))
+
+    async def _async_head_object(
+        self,
+        bucket: str,
+        key: S3KeyPath[K],
+    ) -> HeadObjectOutput[K]:
+        return HeadObjectOutputs.from_aiobotocore(
+            await self._s3.head_object(Bucket=bucket, Key=key)
+        )
+
+    # -- ListObjectVersions -------------------------------------------------
 
     def list_object_versions(
         self,
@@ -97,16 +167,75 @@ class BrandedS3Client:
         key_marker: Optional[S3KeyPath[K]] = None,
         version_id_marker: Optional[str] = None,
     ) -> ListObjectVersionsOutput[K]:
-        """List object versions."""
+        """List object versions (synchronous)."""
+        return self._run(
+            self._async_list_object_versions(bucket, prefix, key_marker, version_id_marker)
+        )
+
+    async def _async_list_object_versions(
+        self,
+        bucket: str,
+        prefix: S3KeyPath[K],
+        key_marker: Optional[S3KeyPath[K]] = None,
+        version_id_marker: Optional[str] = None,
+    ) -> ListObjectVersionsOutput[K]:
         request: "ListObjectVersionsRequestTypeDef" = {"Bucket": bucket, "Prefix": prefix}
         if key_marker is not None:
             request["KeyMarker"] = key_marker
         if version_id_marker is not None:
             request["VersionIdMarker"] = version_id_marker
 
-        response = self._s3.list_object_versions(**request)
-        return ListObjectVersionsOutputs.from_boto3(response)
+        response = await self._s3.list_object_versions(**request)
+        return ListObjectVersionsOutputs.from_aiobotocore(response)
 
-    def get_paginator(self, operation_name: Literal["list_objects_v2"]) -> "ListObjectsV2Paginator":
-        """Get paginator for list operations."""
-        return self._s3.get_paginator(operation_name)
+    # -- ListObjectsV2 (replaces get_paginator) -----------------------------
+
+    def list_objects_v2(
+        self,
+        bucket: str,
+        prefix: str,
+        start_after: Optional[str] = None,
+        continuation_token: Optional[str] = None,
+    ) -> ListObjectsV2Output:
+        """List objects (single page, synchronous).
+
+        Replaces get_paginator("list_objects_v2"). The caller drives
+        pagination by passing back NextContinuationToken.
+        """
+        return self._run(
+            self._async_list_objects_v2(bucket, prefix, start_after, continuation_token)
+        )
+
+    async def _async_list_objects_v2(
+        self,
+        bucket: str,
+        prefix: str,
+        start_after: Optional[str] = None,
+        continuation_token: Optional[str] = None,
+    ) -> ListObjectsV2Output:
+        if continuation_token is not None:
+            response = await self._s3.list_objects_v2(
+                Bucket=bucket, Prefix=prefix, ContinuationToken=continuation_token
+            )
+        elif start_after is not None:
+            response = await self._s3.list_objects_v2(
+                Bucket=bucket, Prefix=prefix, StartAfter=start_after
+            )
+        else:
+            response = await self._s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+
+        contents_raw = response.get("Contents")
+        contents: Optional[list[Object]] = None
+        if contents_raw is not None:
+            contents = [
+                {"Key": assert_aws_field_present(obj.get("Key"), "Object.Key")}
+                for obj in contents_raw
+            ]
+
+        return {
+            "Contents": contents,
+            "IsTruncated": assert_aws_field_present(
+                response.get("IsTruncated"), "ListObjectsV2Output.IsTruncated"
+            ),
+            "NextContinuationToken": response.get("NextContinuationToken"),
+        }

@@ -27,7 +27,7 @@ def read_body_as_json(body: object) -> Dict[str, JSONValue]:
     """
     body_data = cast(Any, body).read()  # type: ignore[misc,explicit-any]
     json_str = cast(str, body_data.decode("utf-8") if isinstance(body_data, bytes) else body_data)  # type: ignore[misc]
-    return cast(Dict[str, JSONValue], json.loads(json_str))  # type: ignore[misc,explicit-any]
+    return cast(Dict[str, JSONValue], json.loads(json_str))
 
 
 def get_error_code(error: Exception) -> str:
