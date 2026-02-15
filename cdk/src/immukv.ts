@@ -9,6 +9,13 @@ import { Construct } from "constructs";
 const LOG_FILE_PATTERN = "_log.json";
 const KEYS_PREFIX = "keys/";
 
+export interface OidcProvider {
+  /** OIDC issuer URL (e.g., 'https://accounts.google.com') */
+  readonly issuerUrl: string;
+  /** Client IDs (audiences) to trust from this provider */
+  readonly clientIds: string[];
+}
+
 export interface ImmuKVProps {
   /**
    * Name of the S3 bucket for ImmuKV storage
@@ -47,7 +54,7 @@ export interface ImmuKVProps {
    * Number of old log versions to retain
    *
    * If specified, only this many old log versions will be kept.
-   * Can be used independently or combined with logVersionRetentionDays.
+   * Can be used independently or combined with logVersionRetention.
    *
    * @default undefined - No count-based deletion (keep all versions)
    */
@@ -68,7 +75,7 @@ export interface ImmuKVProps {
    * Number of old key versions to retain per key
    *
    * If specified, only this many old versions will be kept per key.
-   * Can be used independently or combined with keyVersionRetentionDays.
+   * Can be used independently or combined with keyVersionRetention.
    *
    * @default undefined - No count-based deletion (keep all versions)
    */
@@ -110,6 +117,50 @@ export interface ImmuKVProps {
    * @default - No event notification configured
    */
   readonly onLogEntryCreated?: s3.IBucketNotificationDestination;
+
+  /**
+   * OIDC identity providers for web identity federation
+   *
+   * When specified, creates IAM OIDC providers and a federated IAM role
+   * that allows users authenticated by these providers to assume temporary
+   * AWS credentials via STS AssumeRoleWithWebIdentity.
+   *
+   * The federated role receives the readWritePolicy by default.
+   * Set `oidcReadOnly: true` to use readOnlyPolicy instead.
+   *
+   * Example with Google:
+   * ```ts
+   * new ImmuKV(this, 'ImmuKV', {
+   *   oidcProviders: [{
+   *     issuerUrl: 'https://accounts.google.com',
+   *     clientIds: ['123456789-abcdef.apps.googleusercontent.com'],
+   *   }],
+   * });
+   * ```
+   *
+   * Example with multiple providers:
+   * ```ts
+   * new ImmuKV(this, 'ImmuKV', {
+   *   oidcProviders: [{
+   *     issuerUrl: 'https://accounts.google.com',
+   *     clientIds: ['google-client-id'],
+   *   }, {
+   *     issuerUrl: 'https://login.microsoftonline.com/tenant-id/v2.0',
+   *     clientIds: ['azure-app-id'],
+   *   }],
+   *   oidcReadOnly: true,  // federated users get read-only access
+   * });
+   * ```
+   *
+   * @default - No OIDC federation configured
+   */
+  readonly oidcProviders?: OidcProvider[];
+
+  /**
+   * Whether federated users get read-only access instead of read-write
+   * @default false
+   */
+  readonly oidcReadOnly?: boolean;
 }
 
 /**
@@ -133,6 +184,11 @@ export class ImmuKV extends Construct {
    * IAM managed policy for read-only access
    */
   public readonly readOnlyPolicy: iam.ManagedPolicy;
+
+  /**
+   * IAM role for OIDC-federated users (if oidcProviders was specified)
+   */
+  public readonly federatedRole?: iam.Role;
 
   constructor(scope: Construct, id: string, props?: ImmuKVProps) {
     super(scope, id);
@@ -266,6 +322,51 @@ export class ImmuKV extends Construct {
         s3.EventType.OBJECT_CREATED,
         props.onLogEntryCreated,
         { prefix: `${s3Prefix}${LOG_FILE_PATTERN}` },
+      );
+    }
+
+    // OIDC Federation (optional)
+    if (props?.oidcProviders !== undefined && props.oidcProviders.length > 0) {
+      for (const [i, provider] of props.oidcProviders.entries()) {
+        if (!provider.issuerUrl.startsWith("https://")) {
+          throw new Error(
+            `oidcProviders[${i}].issuerUrl must start with "https://", got: ${provider.issuerUrl}`,
+          );
+        }
+        if (provider.clientIds.length === 0) {
+          throw new Error(
+            `oidcProviders[${i}].clientIds must contain at least one element`,
+          );
+        }
+      }
+
+      const oidcProviders = props.oidcProviders.map(
+        (provider, i) =>
+          new iam.OpenIdConnectProvider(this, `OidcProvider${i}`, {
+            url: provider.issuerUrl,
+            clientIds: provider.clientIds,
+          }),
+      );
+
+      this.federatedRole = new iam.Role(this, "ImmuKVFederatedRole", {
+        assumedBy: new iam.CompositePrincipal(
+          ...oidcProviders.map(
+            (provider, i) =>
+              new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
+                StringEquals: {
+                  [`${props.oidcProviders![i]!.issuerUrl.replace(/^https?:\/\//, "")}:aud`]:
+                    props.oidcProviders![i]!.clientIds,
+                },
+              }),
+          ),
+        ),
+        maxSessionDuration: cdk.Duration.hours(1),
+      });
+
+      this.federatedRole.addManagedPolicy(
+        props.oidcReadOnly === true
+          ? this.readOnlyPolicy
+          : this.readWritePolicy,
       );
     }
   }

@@ -160,6 +160,17 @@ The `ImmuKV` construct accepts the following properties:
 - `keyVersionRetention` (optional): Duration to retain old key object versions
 - `keyVersionsToRetain` (optional): Number of old key versions to retain per key
 - `useKmsEncryption` (optional): Enable KMS encryption instead of S3-managed encryption (default: false)
+- `oidcProviders` (optional): Array of OIDC identity providers for web identity federation. Each provider has an `issuerUrl` (e.g., `'https://accounts.google.com'`) and `clientIds` (audiences to trust). When specified, creates IAM OIDC providers and a federated IAM role.
+- `oidcReadOnly` (optional): Whether federated users get read-only access instead of read-write (default: false)
+
+### `ImmuKV` Class
+
+The `ImmuKV` construct exposes the following public properties:
+
+- `bucket`: The S3 bucket used for ImmuKV storage
+- `readWritePolicy`: IAM managed policy for read/write access
+- `readOnlyPolicy`: IAM managed policy for read-only access
+- `federatedRole` (optional): The IAM role for OIDC-federated users, created when `oidcProviders` is specified
 
 ## License
 

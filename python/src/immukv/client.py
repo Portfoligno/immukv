@@ -52,6 +52,7 @@ from immukv._internal.s3_types import (
 )
 from immukv.types import (
     Config,
+    CredentialProvider,
     Entry,
     Hash,
     KeyNotFoundError,
@@ -59,6 +60,7 @@ from immukv.types import (
     KeyVersionId,
     LogVersionId,
     ReadOnlyError,
+    S3Credentials,
     Sequence,
     TimestampMs,
 )
@@ -114,14 +116,20 @@ class ImmuKVClient(Generic[K, V]):
             "region_name": config.s3_region,
         }
 
+        credential_provider: Optional[CredentialProvider] = None
+
         if config.overrides is not None:
             if config.overrides.endpoint_url is not None:
                 client_params["endpoint_url"] = config.overrides.endpoint_url
             if config.overrides.credentials is not None:
-                client_params["aws_access_key_id"] = config.overrides.credentials.aws_access_key_id
-                client_params["aws_secret_access_key"] = (
-                    config.overrides.credentials.aws_secret_access_key
-                )
+                if callable(config.overrides.credentials):
+                    credential_provider = config.overrides.credentials
+                else:
+                    creds: S3Credentials = config.overrides.credentials
+                    client_params["aws_access_key_id"] = creds.aws_access_key_id
+                    client_params["aws_secret_access_key"] = creds.aws_secret_access_key
+                    if creds.aws_session_token is not None:
+                        client_params["aws_session_token"] = creds.aws_session_token
             if config.overrides.force_path_style:
                 from botocore.config import Config as BotocoreConfig
 
@@ -136,7 +144,9 @@ class ImmuKVClient(Generic[K, V]):
         self._owns_loop = True
 
         # Create aiobotocore client on the background loop
-        aio_client, self._exit_stack = self._run_on_loop(self._create_aio_client(client_params))
+        aio_client, self._exit_stack = self._run_on_loop(
+            self._create_aio_client(client_params, credential_provider)
+        )
         self._s3 = BrandedS3Client(aio_client, self._loop)
         self._log_key = cast(S3KeyPath[LogKey], S3KeyPaths.for_log(config.s3_prefix))
         self._last_repair_check_ms = 0  # In-memory timestamp tracking
@@ -155,11 +165,32 @@ class ImmuKVClient(Generic[K, V]):
     @staticmethod
     async def _create_aio_client(
         client_params: dict[str, object],
+        credential_provider: Optional[CredentialProvider] = None,
     ) -> tuple["S3Client", AsyncExitStack]:
         import aiobotocore.session
 
         stack = AsyncExitStack()
         session = aiobotocore.session.get_session()
+
+        if credential_provider is not None:
+            from aiobotocore.credentials import AioDeferredRefreshableCredentials
+
+            async def _refresh() -> dict[str, str]:
+                creds = await credential_provider()
+                result: dict[str, str] = {
+                    "access_key": creds.aws_access_key_id,
+                    "secret_key": creds.aws_secret_access_key,
+                    "token": creds.aws_session_token or "",
+                }
+                if creds.expires_at is not None:
+                    result["expiry_time"] = creds.expires_at.isoformat()
+                return result
+
+            refreshable = AioDeferredRefreshableCredentials(
+                refresh_using=_refresh, method="immukv-credential-provider"
+            )
+            session._credentials = refreshable  # type: ignore[attr-defined]
+
         client: "S3Client" = await stack.enter_async_context(
             session.create_client("s3", **client_params)  # type: ignore[call-overload,misc]
         )

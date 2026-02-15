@@ -14,7 +14,15 @@ from immukv._internal.types import (
     sequence_from_json,
     timestamp_from_json,
 )
-from immukv.types import Config, Hash, S3Overrides, Sequence, TimestampMs
+from immukv.types import (
+    Config,
+    CredentialProvider,
+    Hash,
+    S3Credentials,
+    S3Overrides,
+    Sequence,
+    TimestampMs,
+)
 
 # --- Hash Computation Tests ---
 
@@ -210,3 +218,153 @@ def test_config_with_all_optional_fields() -> None:
     assert config.overrides.endpoint_url == "http://localhost:4566"
     assert config.repair_check_interval_ms == 60000
     assert config.read_only is True
+
+
+# --- S3Credentials Tests ---
+
+
+def test_s3_credentials_without_session_token() -> None:
+    """Verify S3Credentials works without session token (backward-compatible)."""
+    creds = S3Credentials(
+        aws_access_key_id="AKID",
+        aws_secret_access_key="SECRET",
+    )
+
+    assert creds.aws_access_key_id == "AKID"
+    assert creds.aws_secret_access_key == "SECRET"
+    assert creds.aws_session_token is None
+
+
+def test_s3_credentials_with_session_token() -> None:
+    """Verify S3Credentials accepts aws_session_token for STS temporary credentials."""
+    creds = S3Credentials(
+        aws_access_key_id="AKID",
+        aws_secret_access_key="SECRET",
+        aws_session_token="TOKEN",
+    )
+
+    assert creds.aws_access_key_id == "AKID"
+    assert creds.aws_secret_access_key == "SECRET"
+    assert creds.aws_session_token == "TOKEN"
+
+
+def test_s3_overrides_with_static_credentials() -> None:
+    """Verify S3Overrides accepts static S3Credentials."""
+    creds = S3Credentials(
+        aws_access_key_id="AKID",
+        aws_secret_access_key="SECRET",
+        aws_session_token="TOKEN",
+    )
+    overrides = S3Overrides(credentials=creds)
+
+    assert overrides.credentials is not None
+    assert not callable(overrides.credentials)
+    assert overrides.credentials.aws_access_key_id == "AKID"
+    assert overrides.credentials.aws_session_token == "TOKEN"
+
+
+def test_s3_overrides_with_credential_provider() -> None:
+    """Verify S3Overrides accepts an async callable as credentials."""
+    import asyncio
+
+    async def my_provider() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id="ASYNC_AKID",
+            aws_secret_access_key="ASYNC_SECRET",
+            aws_session_token="ASYNC_TOKEN",
+        )
+
+    overrides = S3Overrides(credentials=my_provider)
+
+    assert overrides.credentials is not None
+    assert callable(overrides.credentials)
+    # Resolve the provider directly (not via the Union-typed field)
+    resolved: S3Credentials = asyncio.run(my_provider())
+    assert resolved.aws_access_key_id == "ASYNC_AKID"
+    assert resolved.aws_secret_access_key == "ASYNC_SECRET"
+    assert resolved.aws_session_token == "ASYNC_TOKEN"
+
+
+# --- Credential Provider Adapter Tests ---
+
+
+def test_credential_provider_refresh_adapter() -> None:
+    """Verify the refresh adapter correctly converts CredentialProvider output to botocore format."""
+    import asyncio
+    from datetime import datetime, timezone
+
+    from aiobotocore.credentials import AioDeferredRefreshableCredentials
+
+    expires = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    async def my_provider() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id="REFRESH_AKID",
+            aws_secret_access_key="REFRESH_SECRET",
+            aws_session_token="REFRESH_TOKEN",
+            expires_at=expires,
+        )
+
+    async def _refresh() -> dict[str, str]:
+        creds = await my_provider()
+        result: dict[str, str] = {
+            "access_key": creds.aws_access_key_id,
+            "secret_key": creds.aws_secret_access_key,
+            "token": creds.aws_session_token or "",
+        }
+        if creds.expires_at is not None:
+            result["expiry_time"] = creds.expires_at.isoformat()
+        return result
+
+    async def run_test() -> None:
+        refreshable = AioDeferredRefreshableCredentials(refresh_using=_refresh, method="test")
+        frozen = await refreshable.get_frozen_credentials()
+        assert frozen.access_key == "REFRESH_AKID"
+        assert frozen.secret_key == "REFRESH_SECRET"
+        assert frozen.token == "REFRESH_TOKEN"
+
+    asyncio.run(run_test())
+
+
+def test_credential_provider_session_injection() -> None:
+    """Verify AioDeferredRefreshableCredentials can be injected into aiobotocore session."""
+    import asyncio
+    from datetime import datetime, timezone
+
+    async def my_provider() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id="INJECT_AKID",
+            aws_secret_access_key="INJECT_SECRET",
+            aws_session_token="INJECT_TOKEN",
+            expires_at=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+    async def run_test() -> None:
+        import aiobotocore.session
+        from aiobotocore.credentials import AioDeferredRefreshableCredentials
+
+        async def _refresh() -> dict[str, str]:
+            creds = await my_provider()
+            result: dict[str, str] = {
+                "access_key": creds.aws_access_key_id,
+                "secret_key": creds.aws_secret_access_key,
+                "token": creds.aws_session_token or "",
+            }
+            if creds.expires_at is not None:
+                result["expiry_time"] = creds.expires_at.isoformat()
+            return result
+
+        session = aiobotocore.session.get_session()
+        refreshable = AioDeferredRefreshableCredentials(
+            refresh_using=_refresh, method="test-injection"
+        )
+        session._credentials = refreshable  # type: ignore[attr-defined]
+
+        resolved = session._credentials  # type: ignore[attr-defined,misc]
+        assert resolved is refreshable  # type: ignore[misc]
+        frozen = await refreshable.get_frozen_credentials()
+        assert frozen.access_key == "INJECT_AKID"
+        assert frozen.secret_key == "INJECT_SECRET"
+        assert frozen.token == "INJECT_TOKEN"
+
+    asyncio.run(run_test())

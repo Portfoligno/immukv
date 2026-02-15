@@ -30,6 +30,23 @@ export type TimestampMs<K extends string> = number & {
 };
 
 /**
+ * Static credentials with access key, secret key, and optional session token.
+ */
+export interface StaticCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  /** STS session token for temporary credentials */
+  sessionToken?: string;
+}
+
+/**
+ * Async credential provider function.
+ * Returns a promise resolving to static credentials.
+ * The AWS SDK v3 S3Client accepts this natively as a credential provider.
+ */
+export type CredentialProvider = () => Promise<StaticCredentials>;
+
+/**
  * Client configuration.
  */
 export interface Config {
@@ -49,11 +66,8 @@ export interface Config {
   overrides?: {
     /** Custom S3 endpoint URL */
     endpointUrl?: string;
-    /** Explicit credentials (not needed for AWS with IAM roles) */
-    credentials?: {
-      accessKeyId: string;
-      secretAccessKey: string;
-    };
+    /** Explicit credentials: static object or async provider function (not needed for AWS with IAM roles) */
+    credentials?: StaticCredentials | CredentialProvider;
     /** Use path-style URLs instead of virtual-hosted style (required for MinIO) */
     forcePathStyle?: boolean;
   };

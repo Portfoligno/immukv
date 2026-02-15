@@ -1,7 +1,8 @@
 """Type definitions for ImmuKV."""
 
 from dataclasses import dataclass
-from typing import Generic, Optional, TypeVar
+from datetime import datetime
+from typing import Awaitable, Callable, Generic, Optional, TypeVar, Union
 
 # Type variables for generic key and value types
 K = TypeVar("K", bound=str)  # Key type must be a subtype of str
@@ -64,6 +65,11 @@ class S3Credentials:
 
     aws_access_key_id: str
     aws_secret_access_key: str
+    aws_session_token: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+
+CredentialProvider = Callable[[], Awaitable[S3Credentials]]
 
 
 @dataclass
@@ -73,8 +79,9 @@ class S3Overrides:
     # Custom S3 endpoint URL
     endpoint_url: Optional[str] = None
 
-    # Explicit credentials (not needed for AWS with IAM roles)
-    credentials: Optional[S3Credentials] = None
+    # Explicit credentials (not needed for AWS with IAM roles).
+    # Can be a static S3Credentials object or an async callable that returns one.
+    credentials: Union[S3Credentials, CredentialProvider, None] = None
 
     # Use path-style URLs instead of virtual-hosted style (required for MinIO)
     force_path_style: bool = False
