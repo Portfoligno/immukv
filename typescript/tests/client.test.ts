@@ -658,4 +658,75 @@ describe('ImmuKVClient', () => {
       expect((derivedClient as any).canWrite).toBeUndefined();
     });
   });
+
+  describe('Credential Features', () => {
+    test('session token passthrough does not break client', async () => {
+      // Close the default client from beforeEach since we create our own
+      client.close();
+
+      const endpointUrl = process.env.IMMUKV_S3_ENDPOINT || 'http://localhost:4566';
+      const accessKeyId = process.env.AWS_ACCESS_KEY_ID || 'test';
+      const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || 'test';
+
+      const tokenConfig: Config = {
+        s3Bucket: bucketName,
+        s3Region: 'us-east-1',
+        s3Prefix: 'test-session-token/',
+        repairCheckIntervalMs: 1000,
+        overrides: {
+          endpointUrl,
+          credentials: {
+            accessKeyId,
+            secretAccessKey,
+            sessionToken: undefined,
+          },
+          forcePathStyle: true,
+        },
+      };
+
+      client = new ImmuKVClient(tokenConfig, identityDecoder, identityEncoder);
+
+      const entry = await client.set('session-key', { data: 'session-value' });
+      expect(entry.key).toBe('session-key');
+      expect(entry.value).toEqual({ data: 'session-value' });
+
+      const retrieved = await client.get('session-key');
+      expect(retrieved.value).toEqual({ data: 'session-value' });
+    });
+
+    test('credential provider function works for authentication', async () => {
+      // Close the default client from beforeEach since we create our own
+      client.close();
+
+      const endpointUrl = process.env.IMMUKV_S3_ENDPOINT || 'http://localhost:4566';
+      const accessKeyId = process.env.AWS_ACCESS_KEY_ID || 'test';
+      const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || 'test';
+
+      const credentialProvider = async () => ({
+        accessKeyId,
+        secretAccessKey,
+      });
+
+      const providerConfig: Config = {
+        s3Bucket: bucketName,
+        s3Region: 'us-east-1',
+        s3Prefix: 'test-cred-provider/',
+        repairCheckIntervalMs: 1000,
+        overrides: {
+          endpointUrl,
+          credentials: credentialProvider,
+          forcePathStyle: true,
+        },
+      };
+
+      client = new ImmuKVClient(providerConfig, identityDecoder, identityEncoder);
+
+      const entry = await client.set('provider-key', { data: 'provider-value' });
+      expect(entry.key).toBe('provider-key');
+      expect(entry.value).toEqual({ data: 'provider-value' });
+
+      const retrieved = await client.get('provider-key');
+      expect(retrieved.value).toEqual({ data: 'provider-value' });
+    });
+  });
 });

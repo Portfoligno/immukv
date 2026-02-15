@@ -176,15 +176,18 @@ class ImmuKVClient(Generic[K, V]):
             from aiobotocore.credentials import AioDeferredRefreshableCredentials
 
             async def _refresh() -> dict[str, str]:
+                from datetime import datetime, timedelta, timezone
+
                 creds = await credential_provider()
-                result: dict[str, str] = {
+                expiry = creds.expires_at or (
+                    datetime.now(timezone.utc) + timedelta(hours=1)
+                )
+                return {
                     "access_key": creds.aws_access_key_id,
                     "secret_key": creds.aws_secret_access_key,
                     "token": creds.aws_session_token or "",
+                    "expiry_time": expiry.isoformat(),
                 }
-                if creds.expires_at is not None:
-                    result["expiry_time"] = creds.expires_at.isoformat()
-                return result
 
             refreshable = AioDeferredRefreshableCredentials(
                 refresh_using=_refresh, method="immukv-credential-provider"

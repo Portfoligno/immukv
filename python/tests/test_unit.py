@@ -306,15 +306,18 @@ def test_credential_provider_refresh_adapter() -> None:
         )
 
     async def _refresh() -> dict[str, str]:
+        from datetime import timedelta
+
         creds = await my_provider()
-        result: dict[str, str] = {
+        expiry = creds.expires_at or (
+            datetime.now(timezone.utc) + timedelta(hours=1)
+        )
+        return {
             "access_key": creds.aws_access_key_id,
             "secret_key": creds.aws_secret_access_key,
             "token": creds.aws_session_token or "",
+            "expiry_time": expiry.isoformat(),
         }
-        if creds.expires_at is not None:
-            result["expiry_time"] = creds.expires_at.isoformat()
-        return result
 
     async def run_test() -> None:
         refreshable = AioDeferredRefreshableCredentials(refresh_using=_refresh, method="test")
@@ -344,15 +347,18 @@ def test_credential_provider_session_injection() -> None:
         from aiobotocore.credentials import AioDeferredRefreshableCredentials
 
         async def _refresh() -> dict[str, str]:
+            from datetime import timedelta
+
             creds = await my_provider()
-            result: dict[str, str] = {
+            expiry = creds.expires_at or (
+                datetime.now(timezone.utc) + timedelta(hours=1)
+            )
+            return {
                 "access_key": creds.aws_access_key_id,
                 "secret_key": creds.aws_secret_access_key,
                 "token": creds.aws_session_token or "",
+                "expiry_time": expiry.isoformat(),
             }
-            if creds.expires_at is not None:
-                result["expiry_time"] = creds.expires_at.isoformat()
-            return result
 
         session = aiobotocore.session.get_session()
         refreshable = AioDeferredRefreshableCredentials(

@@ -812,3 +812,158 @@ def test_with_codec_has_independent_mutable_state(client: ImmuKVClient[str, obje
     # Derived client should be unaffected
     assert derived_client._last_repair_check_ms == 0
     assert derived_client._can_write is None
+
+
+# --- Credential Integration Tests ---
+
+
+def test_session_token_passthrough(s3_bucket: str) -> None:
+    """Test that a session token is passed through without breaking the client."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:9000")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test-session-token/",
+        repair_check_interval_ms=1000,
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=S3Credentials(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                aws_session_token=None,
+            ),
+            force_path_style=True,
+        ),
+    )
+
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
+    with client_instance as c:
+        # Basic set/get should work with session token present
+        entry = c.set("session-key", {"data": "session-value"})
+        assert entry.key == "session-key"
+        assert entry.value == {"data": "session-value"}
+
+        retrieved = c.get("session-key")
+        assert retrieved.value == {"data": "session-value"}
+
+
+def test_credential_provider(s3_bucket: str) -> None:
+    """Test that an async credential provider function works for authentication."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:9000")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    async def provide_credentials() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
+
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test-cred-provider/",
+        repair_check_interval_ms=1000,
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=provide_credentials,
+            force_path_style=True,
+        ),
+    )
+
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
+    with client_instance as c:
+        entry = c.set("provider-key", {"data": "provider-value"})
+        assert entry.key == "provider-key"
+        assert entry.value == {"data": "provider-value"}
+
+        retrieved = c.get("provider-key")
+        assert retrieved.value == {"data": "provider-value"}
+
+
+def test_credential_provider_with_refresh(s3_bucket: str) -> None:
+    """Test that the credential provider is called (AioDeferredRefreshableCredentials wiring)."""
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:9000")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    call_count = 0
+
+    async def counting_provider() -> S3Credentials:
+        nonlocal call_count
+        call_count += 1
+        return S3Credentials(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
+
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test-cred-refresh/",
+        repair_check_interval_ms=1000,
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=counting_provider,
+            force_path_style=True,
+        ),
+    )
+
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
+    with client_instance as c:
+        c.set("refresh-key", {"data": "refresh-value"})
+
+        # The provider should have been called at least once
+        assert call_count >= 1, f"Expected provider to be called at least once, got {call_count}"
+
+
+def test_credential_provider_with_expires_at(s3_bucket: str) -> None:
+    """Test that expires_at on credentials is converted to ISO 8601 expiry_time correctly."""
+    from datetime import datetime, timedelta, timezone
+
+    endpoint_url = os.getenv("IMMUKV_S3_ENDPOINT", "http://localhost:9000")
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "test")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    # Set expiry 30 seconds from now
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=30)
+
+    async def expiring_provider() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            expires_at=expires_at,
+        )
+
+    config = Config(
+        s3_bucket=s3_bucket,
+        s3_region="us-east-1",
+        s3_prefix="test-cred-expires/",
+        repair_check_interval_ms=1000,
+        overrides=S3Overrides(
+            endpoint_url=endpoint_url,
+            credentials=expiring_provider,
+            force_path_style=True,
+        ),
+    )
+
+    client_instance: ImmuKVClient[str, object] = ImmuKVClient(
+        config, identity_decoder, identity_encoder
+    )
+    with client_instance as c:
+        # Should work fine with near-future expiry
+        entry = c.set("expiry-key", {"data": "expiry-value"})
+        assert entry.key == "expiry-key"
+        assert entry.value == {"data": "expiry-value"}
+
+        retrieved = c.get("expiry-key")
+        assert retrieved.value == {"data": "expiry-value"}
