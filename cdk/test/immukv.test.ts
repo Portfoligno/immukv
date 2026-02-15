@@ -632,4 +632,276 @@ describe("ImmuKV", () => {
       }).not.toThrow();
     });
   });
+
+  describe("OIDC Federation", () => {
+    test("creates OIDC provider resource when oidcProviders is specified", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        oidcProviders: [
+          {
+            issuerUrl: "https://accounts.google.com",
+            clientIds: ["my-client-id.apps.googleusercontent.com"],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties(
+        "Custom::AWSCDKOpenIdConnectProvider",
+        Match.objectLike({
+          Url: "https://accounts.google.com",
+          ClientIDList: ["my-client-id.apps.googleusercontent.com"],
+        }),
+      );
+    });
+
+    test("creates federated role with correct trust policy (hostname-only condition key)", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        oidcProviders: [
+          {
+            issuerUrl: "https://accounts.google.com",
+            clientIds: ["my-client-id"],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::IAM::Role", {
+        AssumeRolePolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: "sts:AssumeRoleWithWebIdentity",
+              Condition: {
+                StringEquals: {
+                  "accounts.google.com:aud": ["my-client-id"],
+                },
+              },
+              Effect: "Allow",
+            }),
+          ]),
+        },
+        MaxSessionDuration: 3600,
+      });
+    });
+
+    test("attaches read-only policy when oidcReadOnly is true", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        oidcProviders: [
+          {
+            issuerUrl: "https://accounts.google.com",
+            clientIds: ["my-client-id"],
+          },
+        ],
+        oidcReadOnly: true,
+      });
+      const template = Template.fromStack(stack);
+
+      // Find the federated role (identified by WebIdentity trust policy)
+      const roles = template.findResources("AWS::IAM::Role");
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const federatedRoleEntry = Object.values(roles).find((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoleEntry).toBeDefined();
+
+      // Resolve the attached managed policy and verify it is the read-only one
+      const roleManagedPolicyArns = federatedRoleEntry!.Properties
+        .ManagedPolicyArns as Array<{ Ref: string }>;
+      expect(roleManagedPolicyArns.length).toBe(1);
+      const attachedPolicy = policies[roleManagedPolicyArns[0]!.Ref];
+      const actions =
+        attachedPolicy!.Properties.PolicyDocument.Statement[0].Action;
+      expect(actions).not.toContain("s3:PutObject");
+      expect(actions).toContain("s3:GetObject");
+      expect(actions).toContain("s3:ListBucket");
+    });
+
+    test("attaches read-write policy by default (oidcReadOnly not set)", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        oidcProviders: [
+          {
+            issuerUrl: "https://accounts.google.com",
+            clientIds: ["my-client-id"],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Find the federated role (identified by WebIdentity trust policy)
+      const roles = template.findResources("AWS::IAM::Role");
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const federatedRoleEntry = Object.values(roles).find((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoleEntry).toBeDefined();
+
+      // Resolve the attached managed policy and verify it is the read-write one
+      const roleManagedPolicyArns = federatedRoleEntry!.Properties
+        .ManagedPolicyArns as Array<{ Ref: string }>;
+      expect(roleManagedPolicyArns.length).toBe(1);
+      const attachedPolicy = policies[roleManagedPolicyArns[0]!.Ref];
+      const actions =
+        attachedPolicy!.Properties.PolicyDocument.Statement[0].Action;
+      expect(actions).toContain("s3:PutObject");
+      expect(actions).toContain("s3:GetObject");
+      expect(actions).toContain("s3:ListBucket");
+    });
+
+    test("exposes federatedRole property when oidcProviders specified", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        oidcProviders: [
+          {
+            issuerUrl: "https://accounts.google.com",
+            clientIds: ["my-client-id"],
+          },
+        ],
+      });
+
+      expect(immukv.federatedRole).toBeDefined();
+    });
+
+    test("federatedRole is undefined when oidcProviders is not specified", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV");
+
+      expect(immukv.federatedRole).toBeUndefined();
+    });
+
+    test("multiple OIDC providers create multiple resources but one shared role", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        oidcProviders: [
+          {
+            issuerUrl: "https://accounts.google.com",
+            clientIds: ["google-client-id"],
+          },
+          {
+            issuerUrl: "https://login.microsoftonline.com/tenant-id/v2.0",
+            clientIds: ["azure-app-id"],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Two OIDC provider resources
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 2);
+
+      // Exactly one federated role (CDK also creates service roles for custom resources)
+      const roles = template.findResources("AWS::IAM::Role");
+      const federatedRoles = Object.values(roles).filter((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoles.length).toBe(1);
+
+      // The role's trust policy should have conditions for both providers
+      template.hasResourceProperties("AWS::IAM::Role", {
+        AssumeRolePolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Condition: {
+                StringEquals: {
+                  "accounts.google.com:aud": ["google-client-id"],
+                },
+              },
+            }),
+            Match.objectLike({
+              Condition: {
+                StringEquals: {
+                  "login.microsoftonline.com/tenant-id/v2.0:aud": [
+                    "azure-app-id",
+                  ],
+                },
+              },
+            }),
+          ]),
+        },
+      });
+    });
+
+    test("throws error when issuerUrl does not start with https://", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          oidcProviders: [
+            {
+              issuerUrl: "http://accounts.google.com",
+              clientIds: ["my-client-id"],
+            },
+          ],
+        });
+      }).toThrow(
+        'oidcProviders[0].issuerUrl must start with "https://", got: http://accounts.google.com',
+      );
+    });
+
+    test("throws error when issuerUrl is a bare string without scheme", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          oidcProviders: [
+            {
+              issuerUrl: "accounts.google.com",
+              clientIds: ["my-client-id"],
+            },
+          ],
+        });
+      }).toThrow('oidcProviders[0].issuerUrl must start with "https://"');
+    });
+
+    test("throws error when clientIds is empty", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          oidcProviders: [
+            {
+              issuerUrl: "https://accounts.google.com",
+              clientIds: [],
+            },
+          ],
+        });
+      }).toThrow(
+        "oidcProviders[0].clientIds must contain at least one element",
+      );
+    });
+
+    test("throws error with correct index for second provider validation failure", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          oidcProviders: [
+            {
+              issuerUrl: "https://accounts.google.com",
+              clientIds: ["valid-id"],
+            },
+            {
+              issuerUrl: "http://invalid.example.com",
+              clientIds: ["some-id"],
+            },
+          ],
+        });
+      }).toThrow(
+        'oidcProviders[1].issuerUrl must start with "https://", got: http://invalid.example.com',
+      );
+    });
+
+    test("does not create OIDC resources when oidcProviders is not specified", () => {
+      new ImmuKV(stack, "ImmuKV");
+      const template = Template.fromStack(stack);
+
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 0);
+      template.resourceCountIs("AWS::IAM::Role", 0);
+    });
+
+    test("does not create OIDC resources when oidcProviders is empty array", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        oidcProviders: [],
+      });
+      const template = Template.fromStack(stack);
+
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 0);
+      template.resourceCountIs("AWS::IAM::Role", 0);
+    });
+  });
 });

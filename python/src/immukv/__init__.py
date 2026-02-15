@@ -4,6 +4,7 @@ from immukv.client import ImmuKVClient
 from immukv.json_helpers import JSONValue, ValueDecoder, ValueEncoder
 from immukv.types import (
     Config,
+    CredentialProvider,
     Entry,
     Hash,
     KeyNotFoundError,
@@ -32,6 +33,7 @@ __all__ = [
     # Config helper types
     "S3Credentials",
     "S3Overrides",
+    "CredentialProvider",
     # Branded types (Entry and method parameter field types)
     "LogVersionId",
     "KeyVersionId",

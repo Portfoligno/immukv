@@ -1,5 +1,6 @@
 """ImmuKV client implementation."""
 
+import asyncio
 import json
 import logging
 import time
@@ -49,6 +50,7 @@ from immukv._internal.s3_types import (
 )
 from immukv.types import (
     Config,
+    CredentialProvider,
     Entry,
     Hash,
     KeyNotFoundError,
@@ -56,6 +58,7 @@ from immukv.types import (
     KeyVersionId,
     LogVersionId,
     ReadOnlyError,
+    S3Credentials,
     Sequence,
     TimestampMs,
 )
@@ -67,6 +70,44 @@ K = TypeVar("K", bound=str)
 K2 = TypeVar("K2", bound=str)
 V = TypeVar("V")
 V2 = TypeVar("V2")
+
+
+def _resolve_credential_provider(provider: CredentialProvider) -> S3Credentials:
+    """Resolve an async credential provider to static S3Credentials.
+
+    Since boto3 does not natively support credential provider callbacks,
+    we call the provider once at client creation time to obtain credentials.
+    To refresh credentials, recreate the ImmuKV client.
+
+    Args:
+        provider: An async callable that returns S3Credentials.
+
+    Returns:
+        Resolved S3Credentials from the provider.
+    """
+    awaitable = provider()
+
+    async def _run() -> S3Credentials:
+        return await awaitable
+
+    def _run_sync() -> S3Credentials:
+        return asyncio.run(_run())
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None and loop.is_running():
+        # We're inside an async context — cannot use asyncio.run().
+        # Create a new thread to run the coroutine.
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future: concurrent.futures.Future[S3Credentials] = executor.submit(_run_sync)
+            return future.result()
+    else:
+        return _run_sync()
 
 
 class ImmuKVClient(Generic[K, V]):
@@ -110,10 +151,16 @@ class ImmuKVClient(Generic[K, V]):
             if config.overrides.endpoint_url is not None:
                 client_params["endpoint_url"] = config.overrides.endpoint_url
             if config.overrides.credentials is not None:
-                client_params["aws_access_key_id"] = config.overrides.credentials.aws_access_key_id
-                client_params["aws_secret_access_key"] = (
-                    config.overrides.credentials.aws_secret_access_key
-                )
+                # Resolve credentials: either static S3Credentials or an async callable
+                creds: S3Credentials
+                if callable(config.overrides.credentials):
+                    creds = _resolve_credential_provider(config.overrides.credentials)
+                else:
+                    creds = config.overrides.credentials
+                client_params["aws_access_key_id"] = creds.aws_access_key_id
+                client_params["aws_secret_access_key"] = creds.aws_secret_access_key
+                if creds.aws_session_token is not None:
+                    client_params["aws_session_token"] = creds.aws_session_token
             if config.overrides.force_path_style:
                 from botocore.config import Config as BotocoreConfig
 

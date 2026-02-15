@@ -14,7 +14,15 @@ from immukv._internal.types import (
     sequence_from_json,
     timestamp_from_json,
 )
-from immukv.types import Config, Hash, S3Overrides, Sequence, TimestampMs
+from immukv.types import (
+    Config,
+    CredentialProvider,
+    Hash,
+    S3Credentials,
+    S3Overrides,
+    Sequence,
+    TimestampMs,
+)
 
 # --- Hash Computation Tests ---
 
@@ -204,3 +212,111 @@ def test_config_with_all_optional_fields() -> None:
     assert config.overrides.endpoint_url == "http://localhost:4566"
     assert config.repair_check_interval_ms == 60000
     assert config.read_only is True
+
+
+# --- S3Credentials Tests ---
+
+
+def test_s3_credentials_without_session_token() -> None:
+    """Verify S3Credentials works without session token (backward-compatible)."""
+    creds = S3Credentials(
+        aws_access_key_id="AKID",
+        aws_secret_access_key="SECRET",
+    )
+
+    assert creds.aws_access_key_id == "AKID"
+    assert creds.aws_secret_access_key == "SECRET"
+    assert creds.aws_session_token is None
+
+
+def test_s3_credentials_with_session_token() -> None:
+    """Verify S3Credentials accepts aws_session_token for STS temporary credentials."""
+    creds = S3Credentials(
+        aws_access_key_id="AKID",
+        aws_secret_access_key="SECRET",
+        aws_session_token="TOKEN",
+    )
+
+    assert creds.aws_access_key_id == "AKID"
+    assert creds.aws_secret_access_key == "SECRET"
+    assert creds.aws_session_token == "TOKEN"
+
+
+def test_s3_overrides_with_static_credentials() -> None:
+    """Verify S3Overrides accepts static S3Credentials."""
+    creds = S3Credentials(
+        aws_access_key_id="AKID",
+        aws_secret_access_key="SECRET",
+        aws_session_token="TOKEN",
+    )
+    overrides = S3Overrides(credentials=creds)
+
+    assert overrides.credentials is not None
+    assert not callable(overrides.credentials)
+    assert overrides.credentials.aws_access_key_id == "AKID"
+    assert overrides.credentials.aws_session_token == "TOKEN"
+
+
+def test_s3_overrides_with_credential_provider() -> None:
+    """Verify S3Overrides accepts an async callable as credentials."""
+    import asyncio
+
+    async def my_provider() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id="ASYNC_AKID",
+            aws_secret_access_key="ASYNC_SECRET",
+            aws_session_token="ASYNC_TOKEN",
+        )
+
+    overrides = S3Overrides(credentials=my_provider)
+
+    assert overrides.credentials is not None
+    assert callable(overrides.credentials)
+    # Resolve the provider directly (not via the Union-typed field)
+    resolved: S3Credentials = asyncio.run(my_provider())
+    assert resolved.aws_access_key_id == "ASYNC_AKID"
+    assert resolved.aws_secret_access_key == "ASYNC_SECRET"
+    assert resolved.aws_session_token == "ASYNC_TOKEN"
+
+
+def test_resolve_credential_provider() -> None:
+    """Verify _resolve_credential_provider correctly resolves an async provider."""
+    from immukv.client import _resolve_credential_provider
+
+    async def my_provider() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id="RESOLVED_AKID",
+            aws_secret_access_key="RESOLVED_SECRET",
+            aws_session_token="RESOLVED_TOKEN",
+        )
+
+    resolved = _resolve_credential_provider(my_provider)
+
+    assert isinstance(resolved, S3Credentials)
+    assert resolved.aws_access_key_id == "RESOLVED_AKID"
+    assert resolved.aws_secret_access_key == "RESOLVED_SECRET"
+    assert resolved.aws_session_token == "RESOLVED_TOKEN"
+
+
+def test_resolve_credential_provider_from_running_loop() -> None:
+    """Verify _resolve_credential_provider uses thread-pool fallback inside a running event loop."""
+    import asyncio
+
+    from immukv.client import _resolve_credential_provider
+
+    async def my_provider() -> S3Credentials:
+        return S3Credentials(
+            aws_access_key_id="LOOP_AKID",
+            aws_secret_access_key="LOOP_SECRET",
+            aws_session_token="LOOP_TOKEN",
+        )
+
+    async def run_inside_loop() -> S3Credentials:
+        return _resolve_credential_provider(my_provider)
+
+    resolved = asyncio.run(run_inside_loop())
+
+    assert isinstance(resolved, S3Credentials)
+    assert resolved.aws_access_key_id == "LOOP_AKID"
+    assert resolved.aws_secret_access_key == "LOOP_SECRET"
+    assert resolved.aws_session_token == "LOOP_TOKEN"

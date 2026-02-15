@@ -8,12 +8,14 @@ export {
   KeyNotFoundError,
   ReadOnlyError,
   type Config,
+  type CredentialProvider,
   type Entry,
   type Hash,
   type KeyObjectETag,
   type KeyVersionId,
   type LogVersionId,
   type Sequence,
+  type StaticCredentials,
   type TimestampMs,
 } from './types';
 
