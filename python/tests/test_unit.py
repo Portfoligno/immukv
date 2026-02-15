@@ -309,9 +309,7 @@ def test_credential_provider_refresh_adapter() -> None:
         from datetime import timedelta
 
         creds = await my_provider()
-        expiry = creds.expires_at or (
-            datetime.now(timezone.utc) + timedelta(hours=1)
-        )
+        expiry = creds.expires_at or (datetime.now(timezone.utc) + timedelta(hours=1))
         return {
             "access_key": creds.aws_access_key_id,
             "secret_key": creds.aws_secret_access_key,
@@ -350,9 +348,7 @@ def test_credential_provider_session_injection() -> None:
             from datetime import timedelta
 
             creds = await my_provider()
-            expiry = creds.expires_at or (
-                datetime.now(timezone.utc) + timedelta(hours=1)
-            )
+            expiry = creds.expires_at or (datetime.now(timezone.utc) + timedelta(hours=1))
             return {
                 "access_key": creds.aws_access_key_id,
                 "secret_key": creds.aws_secret_access_key,

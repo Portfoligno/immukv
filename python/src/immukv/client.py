@@ -640,7 +640,11 @@ class ImmuKVClient(Generic[K, V]):
 
         return entries
 
-    def list_keys(self, after_key: Optional[K], limit: Optional[int]) -> List[K]:
+    def list_keys(
+        self,
+        after_key: Optional[K],
+        limit: Optional[int],
+    ) -> List[K]:
         """List all keys in the system (lexicographic order).
 
         Args:
@@ -650,22 +654,60 @@ class ImmuKVClient(Generic[K, V]):
         Returns:
             List of key names in lexicographic order
         """
+        return self._list_keys_internal(after_key, limit)
+
+    def list_keys_with_prefix(
+        self,
+        prefix: str,
+        after_key: Optional[K],
+        limit: Optional[int],
+    ) -> List[K]:
+        """List keys matching the given prefix (lexicographic order).
+
+        Args:
+            prefix: Only return keys starting with this prefix. Filtering is
+                done server-side.
+            after_key: Return keys after this key (exclusive, lexicographic order).
+            limit: Maximum number of keys to return. Pass None for unlimited.
+
+        Returns:
+            List of key names in lexicographic order
+        """
+        return self._list_keys_internal(after_key, limit, prefix=prefix)
+
+    def _list_keys_internal(
+        self,
+        after_key: Optional[K],
+        limit: Optional[int],
+        prefix: Optional[str] = None,
+    ) -> List[K]:
+        """Internal implementation for listing keys.
+
+        Args:
+            after_key: Return keys after this key (exclusive, lexicographic order).
+            limit: Maximum number of keys to return. Pass None for unlimited.
+            prefix: Only return keys starting with this prefix.
+
+        Returns:
+            List of key names in lexicographic order
+        """
         keys: List[K] = []
-        prefix = f"{self._config.s3_prefix}keys/"
-        start_after = f"{prefix}{after_key}.json" if after_key is not None else prefix
+        base_prefix = f"{self._config.s3_prefix}keys/"
+        s3_prefix = f"{base_prefix}{prefix}" if prefix is not None else base_prefix
+        start_after = f"{base_prefix}{after_key}.json" if after_key is not None else s3_prefix
 
         try:
             continuation_token: Optional[str] = None
             while True:
                 page = self._s3.list_objects_v2(
                     bucket=self._config.s3_bucket,
-                    prefix=prefix,
+                    prefix=s3_prefix,
                     start_after=start_after if continuation_token is None else None,
                     continuation_token=continuation_token,
                 )
                 contents = page.get("Contents") or []
                 for obj in contents:
-                    key_name_str = obj["Key"][len(prefix) :]
+                    key_name_str = obj["Key"][len(base_prefix) :]
                     if key_name_str.endswith(".json"):
                         keys.append(cast(K, key_name_str[:-5]))
                         if limit is not None and len(keys) >= limit:

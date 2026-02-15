@@ -358,6 +358,47 @@ def test_list_keys_with_pagination(client: ImmuKVClient[str, object]) -> None:
     assert keys == ["key-02", "key-03"]
 
 
+def test_list_keys_with_prefix(client: ImmuKVClient[str, object]) -> None:
+    """Test listing keys filtered by prefix."""
+    client.set("users/alice", {"role": "admin"})
+    client.set("users/bob", {"role": "user"})
+    client.set("orders/001", {"total": 100})
+    client.set("orders/002", {"total": 200})
+    client.set("config", {"debug": False})
+
+    # Filter by "users/" prefix
+    user_keys = client.list_keys_with_prefix("users/", None, None)
+    assert user_keys == ["users/alice", "users/bob"]
+
+    # Filter by "orders/" prefix
+    order_keys = client.list_keys_with_prefix("orders/", None, None)
+    assert order_keys == ["orders/001", "orders/002"]
+
+    # Without prefix should return all keys
+    all_keys = client.list_keys(None, None)
+    assert len(all_keys) == 5
+
+
+def test_list_keys_with_prefix_and_limit(client: ImmuKVClient[str, object]) -> None:
+    """Test listing keys with both prefix and limit."""
+    client.set("items/a", {"v": 1})
+    client.set("items/b", {"v": 2})
+    client.set("items/c", {"v": 3})
+    client.set("other/x", {"v": 4})
+
+    keys = client.list_keys_with_prefix("items/", None, 2)
+    assert len(keys) == 2
+    assert keys == ["items/a", "items/b"]
+
+
+def test_list_keys_with_prefix_no_matches(client: ImmuKVClient[str, object]) -> None:
+    """Test listing keys with prefix that matches nothing."""
+    client.set("users/alice", {"role": "admin"})
+
+    keys = client.list_keys_with_prefix("nonexistent/", None, None)
+    assert keys == []
+
+
 def test_verify_single_entry(client: ImmuKVClient[str, object]) -> None:
     """Test verifying a single entry's hash."""
     entry = client.set("test-key", {"field": "value"})

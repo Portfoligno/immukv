@@ -494,10 +494,37 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
   /**
    * List all keys in the system (lexicographic order).
+   *
+   * @param afterKey - Return keys after this key (exclusive, lexicographic order).
+   * @param limit - Maximum number of keys to return. Pass undefined for unlimited.
    */
   async listKeys(afterKey: K | undefined, limit: number | undefined): Promise<K[]> {
+    return this._listKeysInternal(afterKey, limit);
+  }
+
+  /**
+   * List keys matching the given prefix (lexicographic order).
+   *
+   * @param prefix - Only return keys starting with this prefix. Filtering is done server-side.
+   * @param afterKey - Return keys after this key (exclusive, lexicographic order).
+   * @param limit - Maximum number of keys to return. Pass undefined for unlimited.
+   */
+  async listKeysWithPrefix(
+    prefix: string,
+    afterKey: K | undefined,
+    limit: number | undefined
+  ): Promise<K[]> {
+    return this._listKeysInternal(afterKey, limit, prefix);
+  }
+
+  private async _listKeysInternal(
+    afterKey: K | undefined,
+    limit: number | undefined,
+    prefix?: string
+  ): Promise<K[]> {
     const keys: K[] = [];
-    const prefix = `${this.config.s3Prefix}keys/`;
+    const basePrefix = `${this.config.s3Prefix}keys/`;
+    const s3Prefix = prefix !== undefined ? `${basePrefix}${prefix}` : basePrefix;
 
     try {
       let continuationToken: string | undefined;
@@ -506,14 +533,14 @@ export class ImmuKVClient<K extends string = string, V = any> {
       while (isTruncated) {
         const response = await this.s3.listObjectsV2({
           Bucket: this.config.s3Bucket,
-          Prefix: prefix,
-          StartAfter: afterKey !== undefined ? `${prefix}${afterKey}.json` : prefix,
+          Prefix: s3Prefix,
+          StartAfter: afterKey !== undefined ? `${basePrefix}${afterKey}.json` : s3Prefix,
           ContinuationToken: continuationToken,
         });
 
         const contents = response.Contents ?? [];
         for (const obj of contents) {
-          const keyName = obj.Key.substring(prefix.length);
+          const keyName = obj.Key.substring(basePrefix.length);
           if (keyName.endsWith('.json')) {
             const cleanKey = keyName.substring(0, keyName.length - 5) as K;
             keys.push(cleanKey);

@@ -310,6 +310,42 @@ describe('ImmuKVClient', () => {
       expect(keys).toHaveLength(2);
       expect(keys).toEqual(['key-02', 'key-03']);
     });
+
+    test('listKeysWithPrefix returns only matching keys', async () => {
+      await client.set('users/alice', { role: 'admin' });
+      await client.set('users/bob', { role: 'user' });
+      await client.set('orders/001', { total: 100 });
+      await client.set('orders/002', { total: 200 });
+      await client.set('config', { debug: false });
+
+      const userKeys = await client.listKeysWithPrefix('users/', undefined, undefined);
+      expect(userKeys).toEqual(['users/alice', 'users/bob']);
+
+      const orderKeys = await client.listKeysWithPrefix('orders/', undefined, undefined);
+      expect(orderKeys).toEqual(['orders/001', 'orders/002']);
+
+      // Without prefix should return all keys
+      const allKeys = await client.listKeys(undefined, undefined);
+      expect(allKeys).toHaveLength(5);
+    });
+
+    test('listKeysWithPrefix with limit', async () => {
+      await client.set('items/a', { v: 1 });
+      await client.set('items/b', { v: 2 });
+      await client.set('items/c', { v: 3 });
+      await client.set('other/x', { v: 4 });
+
+      const keys = await client.listKeysWithPrefix('items/', undefined, 2);
+      expect(keys).toHaveLength(2);
+      expect(keys).toEqual(['items/a', 'items/b']);
+    });
+
+    test('listKeysWithPrefix returns empty array when no matches', async () => {
+      await client.set('users/alice', { role: 'admin' });
+
+      const keys = await client.listKeysWithPrefix('nonexistent/', undefined, undefined);
+      expect(keys).toEqual([]);
+    });
   });
 
   describe('Verification', () => {
