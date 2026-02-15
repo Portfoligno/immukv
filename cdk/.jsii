@@ -4126,7 +4126,7 @@
   },
   "name": "cdk-immukv",
   "readme": {
-    "markdown": "# cdk-immukv\n\nAWS CDK constructs for deploying ImmuKV infrastructure.\n\n## Installation\n\n### TypeScript/JavaScript\n\n```bash\nnpm install cdk-immukv\n```\n\n### Python\n\n```bash\npip install cdk-immukv\n```\n\n## Usage\n\n### Basic Setup\n\n#### TypeScript\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  s3Prefix: 'myapp/',\n});\n```\n\n#### Python\n\n```python\nimport aws_cdk as cdk\nfrom cdk_immukv import ImmuKV\n\napp = cdk.App()\nstack = cdk.Stack(app, \"MyStack\")\n\nImmuKV(stack, \"ImmuKV\",\n    bucket_name=\"my-immukv-bucket\",\n    s3_prefix=\"myapp/\",\n)\n```\n\n### S3 Event Notifications\n\nYou can optionally configure S3 event notifications to trigger when log entries are created. This supports Lambda functions, SNS topics, and SQS queues.\n\nAll notification destinations can be configured using the `onLogEntryCreated` property. Destinations can be in the same stack or different stacks - the Construct pattern handles this cleanly.\n\n#### TypeScript - Lambda Trigger\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport * as lambda from 'aws-cdk-lib/aws-lambda';\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\n// Create a Lambda function\nconst processorFn = new lambda.Function(stack, 'LogProcessor', {\n  runtime: lambda.Runtime.PYTHON_3_11,\n  handler: 'index.handler',\n  code: lambda.Code.fromAsset('lambda'),\n});\n\n// Configure ImmuKV to trigger the Lambda on log entry creation\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  onLogEntryCreated: new s3n.LambdaDestination(processorFn),\n});\n```\n\n#### TypeScript - SNS Topic\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport * as sns from 'aws-cdk-lib/aws-sns';\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\n// Create SNS topic\nconst topic = new sns.Topic(stack, 'LogEntryTopic');\n\n// Configure ImmuKV to publish to SNS on log entry creation\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  onLogEntryCreated: new s3n.SnsDestination(topic),\n});\n```\n\n#### TypeScript - SQS Queue\n\n```typescript\nimport * as cdk from 'aws-cdk-lib';\nimport * as sqs from 'aws-cdk-lib/aws-sqs';\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\nimport { ImmuKV } from 'cdk-immukv';\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, 'MyStack');\n\n// Create SQS queue\nconst queue = new sqs.Queue(stack, 'LogEntryQueue');\n\n// Configure ImmuKV to send to SQS on log entry creation\nnew ImmuKV(stack, 'ImmuKV', {\n  bucketName: 'my-immukv-bucket',\n  onLogEntryCreated: new s3n.SqsDestination(queue),\n});\n```\n\n#### Python - Lambda Trigger\n\n```python\nimport aws_cdk as cdk\nfrom aws_cdk import aws_lambda as lambda_\nfrom aws_cdk.aws_s3_notifications import LambdaDestination\nfrom cdk_immukv import ImmuKV\n\napp = cdk.App()\nstack = cdk.Stack(app, \"MyStack\")\n\n# Create Lambda function\nprocessor_fn = lambda_.Function(stack, \"LogProcessor\",\n    runtime=lambda_.Runtime.PYTHON_3_11,\n    handler=\"index.handler\",\n    code=lambda_.Code.from_asset(\"lambda\"),\n)\n\n# Configure ImmuKV with Lambda trigger\nImmuKV(stack, \"ImmuKV\",\n    bucket_name=\"my-immukv-bucket\",\n    on_log_entry_created=LambdaDestination(processor_fn),\n)\n```\n\n## API\n\nSee the [API documentation](https://github.com/Portfoligno/immukv/tree/main/cdk) for detailed information.\n\n## License\n\nMIT\n\n"
+    "markdown": "# cdk-immukv\n\nAWS CDK constructs for deploying ImmuKV infrastructure.\n\n## Installation\n\n### TypeScript/JavaScript\n\n```bash\nnpm install cdk-immukv\n```\n\n### Python\n\n```bash\npip install cdk-immukv\n```\n\n## Usage\n\n### Basic Setup\n\n#### TypeScript\n\n```typescript\nimport * as cdk from \"aws-cdk-lib\";\nimport { ImmuKV } from \"cdk-immukv\";\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, \"MyStack\");\n\nnew ImmuKV(stack, \"ImmuKV\", {\n  bucketName: \"my-immukv-bucket\",\n  s3Prefix: \"myapp/\",\n});\n```\n\n#### Python\n\n```python\nimport aws_cdk as cdk\nfrom cdk_immukv import ImmuKV\n\napp = cdk.App()\nstack = cdk.Stack(app, \"MyStack\")\n\nImmuKV(stack, \"ImmuKV\",\n    bucket_name=\"my-immukv-bucket\",\n    s3_prefix=\"myapp/\",\n)\n```\n\n### S3 Event Notifications\n\nYou can optionally configure S3 event notifications to trigger when log entries are created. This supports Lambda functions, SNS topics, and SQS queues.\n\nAll notification destinations can be configured using the `onLogEntryCreated` property. Destinations can be in the same stack or different stacks - the Construct pattern handles this cleanly.\n\n#### TypeScript - Lambda Trigger\n\n```typescript\nimport * as cdk from \"aws-cdk-lib\";\nimport * as lambda from \"aws-cdk-lib/aws-lambda\";\nimport * as s3n from \"aws-cdk-lib/aws-s3-notifications\";\nimport { ImmuKV } from \"cdk-immukv\";\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, \"MyStack\");\n\n// Create a Lambda function\nconst processorFn = new lambda.Function(stack, \"LogProcessor\", {\n  runtime: lambda.Runtime.PYTHON_3_11,\n  handler: \"index.handler\",\n  code: lambda.Code.fromAsset(\"lambda\"),\n});\n\n// Configure ImmuKV to trigger the Lambda on log entry creation\nnew ImmuKV(stack, \"ImmuKV\", {\n  bucketName: \"my-immukv-bucket\",\n  onLogEntryCreated: new s3n.LambdaDestination(processorFn),\n});\n```\n\n#### TypeScript - SNS Topic\n\n```typescript\nimport * as cdk from \"aws-cdk-lib\";\nimport * as sns from \"aws-cdk-lib/aws-sns\";\nimport * as s3n from \"aws-cdk-lib/aws-s3-notifications\";\nimport { ImmuKV } from \"cdk-immukv\";\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, \"MyStack\");\n\n// Create SNS topic\nconst topic = new sns.Topic(stack, \"LogEntryTopic\");\n\n// Configure ImmuKV to publish to SNS on log entry creation\nnew ImmuKV(stack, \"ImmuKV\", {\n  bucketName: \"my-immukv-bucket\",\n  onLogEntryCreated: new s3n.SnsDestination(topic),\n});\n```\n\n#### TypeScript - SQS Queue\n\n```typescript\nimport * as cdk from \"aws-cdk-lib\";\nimport * as sqs from \"aws-cdk-lib/aws-sqs\";\nimport * as s3n from \"aws-cdk-lib/aws-s3-notifications\";\nimport { ImmuKV } from \"cdk-immukv\";\n\nconst app = new cdk.App();\nconst stack = new cdk.Stack(app, \"MyStack\");\n\n// Create SQS queue\nconst queue = new sqs.Queue(stack, \"LogEntryQueue\");\n\n// Configure ImmuKV to send to SQS on log entry creation\nnew ImmuKV(stack, \"ImmuKV\", {\n  bucketName: \"my-immukv-bucket\",\n  onLogEntryCreated: new s3n.SqsDestination(queue),\n});\n```\n\n#### Python - Lambda Trigger\n\n```python\nimport aws_cdk as cdk\nfrom aws_cdk import aws_lambda as lambda_\nfrom aws_cdk.aws_s3_notifications import LambdaDestination\nfrom cdk_immukv import ImmuKV\n\napp = cdk.App()\nstack = cdk.Stack(app, \"MyStack\")\n\n# Create Lambda function\nprocessor_fn = lambda_.Function(stack, \"LogProcessor\",\n    runtime=lambda_.Runtime.PYTHON_3_11,\n    handler=\"index.handler\",\n    code=lambda_.Code.from_asset(\"lambda\"),\n)\n\n# Configure ImmuKV with Lambda trigger\nImmuKV(stack, \"ImmuKV\",\n    bucket_name=\"my-immukv-bucket\",\n    on_log_entry_created=LambdaDestination(processor_fn),\n)\n```\n\n## API\n\nThe `ImmuKV` construct accepts the following properties:\n\n- `bucketName` (optional): Name for the S3 bucket. If not specified, an auto-generated bucket name will be used.\n- `s3Prefix` (optional): Prefix for S3 keys\n- `onLogEntryCreated` (optional): S3 notification destination for log entry events\n- `logVersionRetention` (optional): Duration to retain old log versions\n- `logVersionsToRetain` (optional): Number of old log versions to retain\n- `keyVersionRetention` (optional): Duration to retain old key object versions\n- `keyVersionsToRetain` (optional): Number of old key versions to retain per key\n- `useKmsEncryption` (optional): Enable KMS encryption instead of S3-managed encryption (default: false)\n- `oidcProviders` (optional): Array of OIDC identity providers for web identity federation. Each provider has an `issuerUrl` (e.g., `'https://accounts.google.com'`) and `clientIds` (audiences to trust). When specified, creates IAM OIDC providers and a federated IAM role.\n- `oidcReadOnly` (optional): Whether federated users get read-only access instead of read-write (default: false)\n\n### `ImmuKV` Class\n\nThe `ImmuKV` construct exposes the following public properties:\n\n- `bucket`: The S3 bucket used for ImmuKV storage\n- `readWritePolicy`: IAM managed policy for read/write access\n- `readOnlyPolicy`: IAM managed policy for read-only access\n- `federatedRole` (optional): The IAM role for OIDC-federated users, created when `oidcProviders` is specified\n\n## License\n\nMIT\n"
   },
   "repository": {
     "directory": "cdk",
@@ -4159,7 +4159,7 @@
         },
         "locationInModule": {
           "filename": "src/immukv.ts",
-          "line": 103
+          "line": 193
         },
         "parameters": [
           {
@@ -4186,7 +4186,7 @@
       "kind": "class",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 87
+        "line": 172
       },
       "name": "ImmuKV",
       "properties": [
@@ -4198,7 +4198,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 91
+            "line": 176
           },
           "name": "bucket",
           "type": {
@@ -4213,7 +4213,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 101
+            "line": 186
           },
           "name": "readOnlyPolicy",
           "type": {
@@ -4228,11 +4228,27 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 96
+            "line": 181
           },
           "name": "readWritePolicy",
           "type": {
             "fqn": "aws-cdk-lib.aws_iam.ManagedPolicy"
+          }
+        },
+        {
+          "docs": {
+            "stability": "experimental",
+            "summary": "IAM role for OIDC-federated users (if oidcProviders was specified)."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 191
+          },
+          "name": "federatedRole",
+          "optional": true,
+          "type": {
+            "fqn": "aws-cdk-lib.aws_iam.Role"
           }
         }
       ],
@@ -4248,7 +4264,7 @@
       "kind": "interface",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 6
+        "line": 19
       },
       "name": "ImmuKVProps",
       "properties": [
@@ -4262,7 +4278,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 11
+            "line": 24
           },
           "name": "bucketName",
           "optional": true,
@@ -4273,32 +4289,34 @@
         {
           "abstract": true,
           "docs": {
-            "default": "365",
+            "default": "undefined - No time-based deletion (keep forever)",
+            "remarks": "If specified, old key versions will be deleted after this duration.\nMust be expressible in whole days (e.g., Duration.days(180)).\nCan be used independently or combined with keyVersionsToRetain.",
             "stability": "experimental",
-            "summary": "Number of days to retain old key object versions."
+            "summary": "Duration to retain old key object versions."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 35
+            "line": 72
           },
-          "name": "keyVersionRetentionDays",
+          "name": "keyVersionRetention",
           "optional": true,
           "type": {
-            "primitive": "number"
+            "fqn": "aws-cdk-lib.Duration"
           }
         },
         {
           "abstract": true,
           "docs": {
-            "default": "100",
+            "default": "undefined - No count-based deletion (keep all versions)",
+            "remarks": "If specified, only this many old versions will be kept per key.\nCan be used independently or combined with keyVersionRetention.",
             "stability": "experimental",
             "summary": "Number of old key versions to retain per key."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 41
+            "line": 82
           },
           "name": "keyVersionsToRetain",
           "optional": true,
@@ -4309,16 +4327,36 @@
         {
           "abstract": true,
           "docs": {
-            "default": "365",
+            "default": "undefined - No time-based deletion (keep forever)",
+            "remarks": "If specified, old log versions will be deleted after this duration.\nMust be expressible in whole days (e.g., Duration.days(365)).\nCan be used independently or combined with logVersionsToRetain.",
             "stability": "experimental",
-            "summary": "Number of days to retain old log versions."
+            "summary": "Duration to retain old log versions."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 23
+            "line": 51
           },
-          "name": "logVersionRetentionDays",
+          "name": "logVersionRetention",
+          "optional": true,
+          "type": {
+            "fqn": "aws-cdk-lib.Duration"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "default": "undefined - No count-based deletion (keep all versions)",
+            "remarks": "If specified, only this many old log versions will be kept.\nCan be used independently or combined with logVersionRetention.",
+            "stability": "experimental",
+            "summary": "Number of old log versions to retain."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 61
+          },
+          "name": "logVersionsToRetain",
           "optional": true,
           "type": {
             "primitive": "number"
@@ -4327,19 +4365,43 @@
         {
           "abstract": true,
           "docs": {
-            "default": "1000",
+            "default": "- No OIDC federation configured",
+            "remarks": "When specified, creates IAM OIDC providers and a federated IAM role\nthat allows users authenticated by these providers to assume temporary\nAWS credentials via STS AssumeRoleWithWebIdentity.\n\nThe federated role receives the readWritePolicy by default.\nSet `oidcReadOnly: true` to use readOnlyPolicy instead.\n\nExample with Google:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  oidcProviders: [{\n    issuerUrl: 'https://accounts.google.com',\n    clientIds: ['123456789-abcdef.apps.googleusercontent.com'],\n  }],\n});\n```\n\nExample with multiple providers:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  oidcProviders: [{\n    issuerUrl: 'https://accounts.google.com',\n    clientIds: ['google-client-id'],\n  }, {\n    issuerUrl: 'https://login.microsoftonline.com/tenant-id/v2.0',\n    clientIds: ['azure-app-id'],\n  }],\n  oidcReadOnly: true,  // federated users get read-only access\n});\n```",
             "stability": "experimental",
-            "summary": "Number of old log versions to retain."
+            "summary": "OIDC identity providers for web identity federation."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 29
+            "line": 157
           },
-          "name": "logVersionsToRetain",
+          "name": "oidcProviders",
           "optional": true,
           "type": {
-            "primitive": "number"
+            "collection": {
+              "elementtype": {
+                "fqn": "cdk-immukv.OidcProvider"
+              },
+              "kind": "array"
+            }
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "default": "false",
+            "stability": "experimental",
+            "summary": "Whether federated users get read-only access instead of read-write."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 163
+          },
+          "name": "oidcReadOnly",
+          "optional": true,
+          "type": {
+            "primitive": "boolean"
           }
         },
         {
@@ -4353,7 +4415,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 78
+            "line": 119
           },
           "name": "onLogEntryCreated",
           "optional": true,
@@ -4365,13 +4427,14 @@
           "abstract": true,
           "docs": {
             "default": "- No prefix (root of bucket)",
+            "remarks": "Controls where ImmuKV stores its data within the S3 bucket:\n- Empty string or undefined: Files stored at bucket root (e.g., `_log.json`, `keys/mykey.json`)\n- Without trailing slash (e.g., `myapp`): Flat prefix (e.g., `myapp_log.json`, `myappkeys/mykey.json`)\n- With trailing slash (e.g., `myapp/`): Directory-style prefix (e.g., `myapp/_log.json`, `myapp/keys/mykey.json`)\n\nNote: S3 event notifications use prefix matching, so the filter will match any object\nstarting with `${s3Prefix}_log.json` (e.g., `_log.json`, `_log.json.backup`, etc.).\nThis is intentional behavior.",
             "stability": "experimental",
             "summary": "S3 prefix for all ImmuKV objects."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 17
+            "line": 40
           },
           "name": "s3Prefix",
           "optional": true,
@@ -4389,7 +4452,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 47
+            "line": 88
           },
           "name": "useKmsEncryption",
           "optional": true,
@@ -4399,8 +4462,62 @@
         }
       ],
       "symbolId": "src/immukv:ImmuKVProps"
+    },
+    "cdk-immukv.OidcProvider": {
+      "assembly": "cdk-immukv",
+      "datatype": true,
+      "docs": {
+        "stability": "experimental"
+      },
+      "fqn": "cdk-immukv.OidcProvider",
+      "kind": "interface",
+      "locationInModule": {
+        "filename": "src/immukv.ts",
+        "line": 12
+      },
+      "name": "OidcProvider",
+      "properties": [
+        {
+          "abstract": true,
+          "docs": {
+            "stability": "experimental",
+            "summary": "Client IDs (audiences) to trust from this provider."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 16
+          },
+          "name": "clientIds",
+          "type": {
+            "collection": {
+              "elementtype": {
+                "primitive": "string"
+              },
+              "kind": "array"
+            }
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "stability": "experimental",
+            "summary": "OIDC issuer URL (e.g., 'https://accounts.google.com')."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 14
+          },
+          "name": "issuerUrl",
+          "type": {
+            "primitive": "string"
+          }
+        }
+      ],
+      "symbolId": "src/immukv:OidcProvider"
     }
   },
-  "version": "0.1.12-dev.0",
-  "fingerprint": "/WCcHlnUs1ShX0hzMSzFAHEYx/Jk8sgh/8DB6aWgS2g="
+  "version": "0.1.22-dev.0",
+  "fingerprint": "oHA/vWSMz0jzV0uJNYExajHXr3BZYsZBIv7VqSpSoRA="
 }
