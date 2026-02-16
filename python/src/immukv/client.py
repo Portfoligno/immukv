@@ -705,7 +705,8 @@ class ImmuKVClient(Generic[K, V]):
                     start_after=start_after if continuation_token is None else None,
                     continuation_token=continuation_token,
                 )
-                contents = page.get("Contents") or []
+                contents_raw = page.get("Contents")
+                contents = contents_raw if contents_raw is not None else []
                 for obj in contents:
                     key_name_str = obj["Key"][len(base_prefix) :]
                     if key_name_str.endswith(".json"):
