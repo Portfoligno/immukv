@@ -179,19 +179,15 @@ class ImmuKVClient(Generic[K, V]):
                 from datetime import datetime, timedelta, timezone
 
                 creds = await credential_provider()
-                expiry = (
-                    creds.expires_at
-                    if creds.expires_at is not None
-                    else datetime.now(timezone.utc) + timedelta(hours=1)
-                )
+                if creds.expires_at is not None:
+                    expiry = creds.expires_at
+                else:
+                    expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+                token = creds.aws_session_token if creds.aws_session_token is not None else ""
                 return {
                     "access_key": creds.aws_access_key_id,
                     "secret_key": creds.aws_secret_access_key,
-                    "token": (
-                        creds.aws_session_token
-                        if creds.aws_session_token is not None
-                        else ""
-                    ),
+                    "token": token,
                     "expiry_time": expiry.isoformat(),
                 }
 
