@@ -182,7 +182,7 @@ class ImmuKVClient(Generic[K, V]):
                 expiry = (
                     creds.expires_at
                     if creds.expires_at is not None
-                    else (datetime.now(timezone.utc) + timedelta(hours=1))
+                    else datetime.now(timezone.utc) + timedelta(hours=1)
                 )
                 return {
                     "access_key": creds.aws_access_key_id,
