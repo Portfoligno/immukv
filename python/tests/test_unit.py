@@ -309,11 +309,11 @@ def test_credential_provider_refresh_adapter() -> None:
         from datetime import timedelta
 
         creds = await my_provider()
-        expiry = creds.expires_at or (datetime.now(timezone.utc) + timedelta(hours=1))
+        expiry = creds.expires_at if creds.expires_at is not None else (datetime.now(timezone.utc) + timedelta(hours=1))
         return {
             "access_key": creds.aws_access_key_id,
             "secret_key": creds.aws_secret_access_key,
-            "token": creds.aws_session_token or "",
+            "token": creds.aws_session_token if creds.aws_session_token is not None else "",
             "expiry_time": expiry.isoformat(),
         }
 
