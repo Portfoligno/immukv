@@ -328,6 +328,10 @@ immukv/
 │   │   ├── json_helpers.py      # JSON serialization helpers
 │   │   ├── py.typed             # PEP 561 marker for type hints
 │   │   └── types.py             # Type definitions
+│   ├── stubs/
+│   │   └── wrapt/              # Type stubs for wrapt
+│   │       ├── __init__.pyi
+│   │       └── proxies.pyi
 │   ├── tests/
 │   └── pyproject.toml
 ├── typescript/          # TypeScript package
