@@ -5,6 +5,19 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.23] - 2026-02-22
+
+### Changed
+
+- CDK: Redesigned construct for multi-prefix architecture
+  - New `prefixes` prop replaces single `s3Prefix` — each prefix gets independent IAM policies, lifecycle rules, notifications, and OIDC federation
+  - Access per-prefix resources via `prefix(s3Prefix)` method returning `ImmuKVPrefixResources`
+  - Prefix overlap and collision validation
+
+### Fixed
+
+- Python: Replace implicit boolean coercion with explicit `None` checks
+
 ## [0.1.22] - 2026-02-16
 
 ### Added
@@ -302,6 +315,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.23]: https://github.com/Portfoligno/immukv/releases/tag/0.1.23
 [0.1.22]: https://github.com/Portfoligno/immukv/releases/tag/0.1.22
 [0.1.21]: https://github.com/Portfoligno/immukv/releases/tag/0.1.21
 [0.1.20]: https://github.com/Portfoligno/immukv/releases/tag/0.1.20
