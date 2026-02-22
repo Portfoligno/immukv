@@ -4148,7 +4148,7 @@
       "assembly": "cdk-immukv",
       "base": "constructs.Construct",
       "docs": {
-        "remarks": "Creates an S3 bucket with versioning enabled and IAM policies for\nread/write and read-only access.",
+        "remarks": "Creates an S3 bucket with versioning enabled and per-prefix IAM policies,\nlifecycle rules, event notifications, and optional OIDC federation.",
         "stability": "experimental",
         "summary": "AWS CDK Construct for ImmuKV infrastructure."
       },
@@ -4159,7 +4159,7 @@
         },
         "locationInModule": {
           "filename": "src/immukv.ts",
-          "line": 193
+          "line": 223
         },
         "parameters": [
           {
@@ -4176,7 +4176,6 @@
           },
           {
             "name": "props",
-            "optional": true,
             "type": {
               "fqn": "cdk-immukv.ImmuKVProps"
             }
@@ -4186,19 +4185,49 @@
       "kind": "class",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 172
+        "line": 191
       },
+      "methods": [
+        {
+          "docs": {
+            "custom": {
+              "throws": "Error if no prefix with that name exists."
+            },
+            "example": "instance.prefix(\"config/\").readWritePolicy\ninstance.prefix(\"\").readWritePolicy  // root prefix",
+            "stability": "experimental",
+            "summary": "Get resources for a specific prefix."
+          },
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 209
+          },
+          "name": "prefix",
+          "parameters": [
+            {
+              "name": "s3Prefix",
+              "type": {
+                "primitive": "string"
+              }
+            }
+          ],
+          "returns": {
+            "type": {
+              "fqn": "cdk-immukv.ImmuKVPrefixResources"
+            }
+          }
+        }
+      ],
       "name": "ImmuKV",
       "properties": [
         {
           "docs": {
             "stability": "experimental",
-            "summary": "The S3 bucket used for ImmuKV storage."
+            "summary": "The S3 bucket shared by all prefixes."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 176
+            "line": 193
           },
           "name": "bucket",
           "type": {
@@ -4207,81 +4236,57 @@
         },
         {
           "docs": {
+            "remarks": "Use `prefix()` for type-safe access with runtime validation.",
             "stability": "experimental",
-            "summary": "IAM managed policy for read-only access."
+            "summary": "Per-prefix resources, keyed by the s3Prefix string."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 186
+            "line": 199
           },
-          "name": "readOnlyPolicy",
+          "name": "prefixes",
           "type": {
-            "fqn": "aws-cdk-lib.aws_iam.ManagedPolicy"
-          }
-        },
-        {
-          "docs": {
-            "stability": "experimental",
-            "summary": "IAM managed policy for read/write access."
-          },
-          "immutable": true,
-          "locationInModule": {
-            "filename": "src/immukv.ts",
-            "line": 181
-          },
-          "name": "readWritePolicy",
-          "type": {
-            "fqn": "aws-cdk-lib.aws_iam.ManagedPolicy"
-          }
-        },
-        {
-          "docs": {
-            "stability": "experimental",
-            "summary": "IAM role for OIDC-federated users (if oidcProviders was specified)."
-          },
-          "immutable": true,
-          "locationInModule": {
-            "filename": "src/immukv.ts",
-            "line": 191
-          },
-          "name": "federatedRole",
-          "optional": true,
-          "type": {
-            "fqn": "aws-cdk-lib.aws_iam.Role"
+            "collection": {
+              "elementtype": {
+                "fqn": "cdk-immukv.ImmuKVPrefixResources"
+              },
+              "kind": "map"
+            }
           }
         }
       ],
       "symbolId": "src/immukv:ImmuKV"
     },
-    "cdk-immukv.ImmuKVProps": {
+    "cdk-immukv.ImmuKVPrefixConfig": {
       "assembly": "cdk-immukv",
       "datatype": true,
       "docs": {
-        "stability": "experimental"
+        "remarks": "Each prefix operates as an independent ImmuKV namespace with its own\nlifecycle rules, event notifications, IAM policies, and optional OIDC\nfederation. Prefixes are isolated at the IAM level — a policy generated\nfor one prefix does not grant access to another.",
+        "stability": "experimental",
+        "summary": "Configuration for a single ImmuKV prefix within a bucket."
       },
-      "fqn": "cdk-immukv.ImmuKVProps",
+      "fqn": "cdk-immukv.ImmuKVPrefixConfig",
       "kind": "interface",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 19
+        "line": 27
       },
-      "name": "ImmuKVProps",
+      "name": "ImmuKVPrefixConfig",
       "properties": [
         {
           "abstract": true,
           "docs": {
-            "default": "- Auto-generated bucket name",
+            "remarks": "Controls where ImmuKV stores its data within the S3 bucket:\n- Empty string: Files at bucket root (`_log.json`, `keys/mykey.json`)\n- With trailing slash (e.g., `myapp/`): Directory-style (`myapp/_log.json`, `myapp/keys/mykey.json`)\n- Without trailing slash (e.g., `myapp`): Flat prefix (`myapp_log.json`, `myappkeys/mykey.json`)\n\nValidation:\n- Must not start with `/` or contain `..`\n- Must not duplicate another prefix in the same instance\n- Must not overlap another prefix (one being a prefix of the other)\n- Empty string `\"\"` cannot coexist with other prefixes (it matches all objects)",
             "stability": "experimental",
-            "summary": "Name of the S3 bucket for ImmuKV storage."
+            "summary": "S3 key prefix for this ImmuKV namespace."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 24
+            "line": 42
           },
-          "name": "bucketName",
-          "optional": true,
+          "name": "s3Prefix",
           "type": {
             "primitive": "string"
           }
@@ -4289,15 +4294,15 @@
         {
           "abstract": true,
           "docs": {
-            "default": "undefined - No time-based deletion (keep forever)",
-            "remarks": "If specified, old key versions will be deleted after this duration.\nMust be expressible in whole days (e.g., Duration.days(180)).\nCan be used independently or combined with keyVersionsToRetain.",
+            "default": "undefined — keep forever",
+            "remarks": "Must be expressible in whole days.",
             "stability": "experimental",
-            "summary": "Duration to retain old key object versions."
+            "summary": "Duration to retain old key object versions for this prefix."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 72
+            "line": 63
           },
           "name": "keyVersionRetention",
           "optional": true,
@@ -4308,15 +4313,15 @@
         {
           "abstract": true,
           "docs": {
-            "default": "undefined - No count-based deletion (keep all versions)",
-            "remarks": "If specified, only this many old versions will be kept per key.\nCan be used independently or combined with keyVersionRetention.",
+            "default": "undefined — keep all versions",
+            "remarks": "Must be a non-negative integer.",
             "stability": "experimental",
-            "summary": "Number of old key versions to retain per key."
+            "summary": "Number of old key versions to retain per key for this prefix."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 82
+            "line": 70
           },
           "name": "keyVersionsToRetain",
           "optional": true,
@@ -4327,15 +4332,15 @@
         {
           "abstract": true,
           "docs": {
-            "default": "undefined - No time-based deletion (keep forever)",
-            "remarks": "If specified, old log versions will be deleted after this duration.\nMust be expressible in whole days (e.g., Duration.days(365)).\nCan be used independently or combined with logVersionsToRetain.",
+            "default": "undefined — keep forever",
+            "remarks": "Must be expressible in whole days.",
             "stability": "experimental",
-            "summary": "Duration to retain old log versions."
+            "summary": "Duration to retain old log versions for this prefix."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 51
+            "line": 49
           },
           "name": "logVersionRetention",
           "optional": true,
@@ -4346,15 +4351,15 @@
         {
           "abstract": true,
           "docs": {
-            "default": "undefined - No count-based deletion (keep all versions)",
-            "remarks": "If specified, only this many old log versions will be kept.\nCan be used independently or combined with logVersionRetention.",
+            "default": "undefined — keep all versions",
+            "remarks": "Must be a non-negative integer.",
             "stability": "experimental",
-            "summary": "Number of old log versions to retain."
+            "summary": "Number of old log versions to retain for this prefix."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 61
+            "line": 56
           },
           "name": "logVersionsToRetain",
           "optional": true,
@@ -4365,15 +4370,15 @@
         {
           "abstract": true,
           "docs": {
-            "default": "- No OIDC federation configured",
-            "remarks": "When specified, creates IAM OIDC providers and a federated IAM role\nthat allows users authenticated by these providers to assume temporary\nAWS credentials via STS AssumeRoleWithWebIdentity.\n\nThe federated role receives the readWritePolicy by default.\nSet `oidcReadOnly: true` to use readOnlyPolicy instead.\n\nExample with Google:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  oidcProviders: [{\n    issuerUrl: 'https://accounts.google.com',\n    clientIds: ['123456789-abcdef.apps.googleusercontent.com'],\n  }],\n});\n```\n\nExample with multiple providers:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  oidcProviders: [{\n    issuerUrl: 'https://accounts.google.com',\n    clientIds: ['google-client-id'],\n  }, {\n    issuerUrl: 'https://login.microsoftonline.com/tenant-id/v2.0',\n    clientIds: ['azure-app-id'],\n  }],\n  oidcReadOnly: true,  // federated users get read-only access\n});\n```",
+            "default": "undefined — no OIDC federation",
+            "remarks": "Creates a federated IAM role whose policies are scoped to this prefix only.\nThe role receives this prefix's readWritePolicy by default,\nor readOnlyPolicy if `oidcReadOnly` is true.",
             "stability": "experimental",
-            "summary": "OIDC identity providers for web identity federation."
+            "summary": "OIDC identity providers for web identity federation scoped to this prefix."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 157
+            "line": 90
           },
           "name": "oidcProviders",
           "optional": true,
@@ -4390,13 +4395,14 @@
           "abstract": true,
           "docs": {
             "default": "false",
+            "remarks": "Only meaningful when `oidcProviders` is set.",
             "stability": "experimental",
-            "summary": "Whether federated users get read-only access instead of read-write."
+            "summary": "Whether the federated role gets read-only access instead of read-write."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 163
+            "line": 97
           },
           "name": "oidcReadOnly",
           "optional": true,
@@ -4407,36 +4413,161 @@
         {
           "abstract": true,
           "docs": {
-            "default": "- No event notification configured",
-            "remarks": "Example with Lambda:\n```ts\nimport * as s3n from 'aws-cdk-lib/aws-s3-notifications';\n\nnew ImmuKV(this, 'ImmuKV', {\n  onLogEntryCreated: new s3n.LambdaDestination(myFunction)\n});\n```\n\nExample with SNS:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  onLogEntryCreated: new s3n.SnsDestination(myTopic)\n});\n```\n\nExample with SQS:\n```ts\nnew ImmuKV(this, 'ImmuKV', {\n  onLogEntryCreated: new s3n.SqsDestination(myQueue)\n});\n```",
+            "default": "undefined — no notification",
+            "remarks": "Event filter matches `${s3Prefix}_log.json` via S3 prefix matching.",
             "stability": "experimental",
-            "summary": "Optional notification destination to trigger when log entries are created. Supports Lambda functions, SNS topics, and SQS queues."
+            "summary": "Notification destination triggered when log entries are created under this prefix. Supports Lambda, SNS, and SQS."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 119
+            "line": 79
           },
           "name": "onLogEntryCreated",
           "optional": true,
           "type": {
             "fqn": "aws-cdk-lib.aws_s3.IBucketNotificationDestination"
           }
-        },
+        }
+      ],
+      "symbolId": "src/immukv:ImmuKVPrefixConfig"
+    },
+    "cdk-immukv.ImmuKVPrefixResources": {
+      "assembly": "cdk-immukv",
+      "datatype": true,
+      "docs": {
+        "stability": "experimental",
+        "summary": "Resources created for a single ImmuKV prefix."
+      },
+      "fqn": "cdk-immukv.ImmuKVPrefixResources",
+      "kind": "interface",
+      "locationInModule": {
+        "filename": "src/immukv.ts",
+        "line": 103
+      },
+      "name": "ImmuKVPrefixResources",
+      "properties": [
         {
           "abstract": true,
           "docs": {
-            "default": "- No prefix (root of bucket)",
-            "remarks": "Controls where ImmuKV stores its data within the S3 bucket:\n- Empty string or undefined: Files stored at bucket root (e.g., `_log.json`, `keys/mykey.json`)\n- Without trailing slash (e.g., `myapp`): Flat prefix (e.g., `myapp_log.json`, `myappkeys/mykey.json`)\n- With trailing slash (e.g., `myapp/`): Directory-style prefix (e.g., `myapp/_log.json`, `myapp/keys/mykey.json`)\n\nNote: S3 event notifications use prefix matching, so the filter will match any object\nstarting with `${s3Prefix}_log.json` (e.g., `_log.json`, `_log.json.backup`, etc.).\nThis is intentional behavior.",
+            "remarks": "Same as readWritePolicy but without PutObject.",
             "stability": "experimental",
-            "summary": "S3 prefix for all ImmuKV objects."
+            "summary": "IAM managed policy granting read-only access scoped to this prefix."
           },
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 40
+            "line": 120
+          },
+          "name": "readOnlyPolicy",
+          "type": {
+            "fqn": "aws-cdk-lib.aws_iam.ManagedPolicy"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "remarks": "Object actions (GetObject, GetObjectVersion, PutObject, HeadObject)\non `bucketArn/${prefix}*`. Bucket actions (ListBucket, ListBucketVersions)\non `bucketArn` with `s3:prefix` condition.",
+            "stability": "experimental",
+            "summary": "IAM managed policy granting read-write access scoped to this prefix."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 114
+          },
+          "name": "readWritePolicy",
+          "type": {
+            "fqn": "aws-cdk-lib.aws_iam.ManagedPolicy"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "stability": "experimental",
+            "summary": "The S3 prefix string (as provided in the config)."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 105
           },
           "name": "s3Prefix",
+          "type": {
+            "primitive": "string"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "remarks": "Only present when `oidcProviders` was specified.",
+            "stability": "experimental",
+            "summary": "Federated IAM role for OIDC users scoped to this prefix."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 126
+          },
+          "name": "federatedRole",
+          "optional": true,
+          "type": {
+            "fqn": "aws-cdk-lib.aws_iam.Role"
+          }
+        }
+      ],
+      "symbolId": "src/immukv:ImmuKVPrefixResources"
+    },
+    "cdk-immukv.ImmuKVProps": {
+      "assembly": "cdk-immukv",
+      "datatype": true,
+      "docs": {
+        "stability": "experimental"
+      },
+      "fqn": "cdk-immukv.ImmuKVProps",
+      "kind": "interface",
+      "locationInModule": {
+        "filename": "src/immukv.ts",
+        "line": 129
+      },
+      "name": "ImmuKVProps",
+      "properties": [
+        {
+          "abstract": true,
+          "docs": {
+            "example": "// Two prefixes with different retention and notifications:\nnew ImmuKV(this, 'Store', {\n  prefixes: [\n    { s3Prefix: 'pipeline/', logVersionRetention: cdk.Duration.days(2555),\n      onLogEntryCreated: new s3n.LambdaDestination(shadowUpdateFn) },\n    { s3Prefix: 'config/', logVersionRetention: cdk.Duration.days(90),\n      onLogEntryCreated: new s3n.LambdaDestination(configSyncFn) },\n  ],\n});",
+            "remarks": "Each entry defines an isolated ImmuKV namespace within the shared bucket,\nwith its own lifecycle rules, event notifications, IAM policies,\nand optional OIDC federation.",
+            "stability": "experimental",
+            "summary": "Prefix configurations. At least one entry is required."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 168
+          },
+          "name": "prefixes",
+          "type": {
+            "collection": {
+              "elementtype": {
+                "fqn": "cdk-immukv.ImmuKVPrefixConfig"
+              },
+              "kind": "array"
+            }
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "default": "— auto-generated",
+            "stability": "experimental",
+            "summary": "Name of the S3 bucket."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 134
+          },
+          "name": "bucketName",
           "optional": true,
           "type": {
             "primitive": "string"
@@ -4452,7 +4583,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 88
+            "line": 140
           },
           "name": "useKmsEncryption",
           "optional": true,
@@ -4502,7 +4633,7 @@
           "abstract": true,
           "docs": {
             "stability": "experimental",
-            "summary": "OIDC issuer URL (e.g., 'https://accounts.google.com')."
+            "summary": "OIDC issuer URL (must start with \"https://\")."
           },
           "immutable": true,
           "locationInModule": {
@@ -4518,6 +4649,6 @@
       "symbolId": "src/immukv:OidcProvider"
     }
   },
-  "version": "0.1.22-dev.0",
-  "fingerprint": "oHA/vWSMz0jzV0uJNYExajHXr3BZYsZBIv7VqSpSoRA="
+  "version": "0.1.23-dev.0",
+  "fingerprint": "gADMSHlJrJzX1G0QmGW7hvKHC3mDe5kkItSk4QU0BTg="
 }

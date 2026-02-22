@@ -10,266 +10,373 @@ const LOG_FILE_PATTERN = "_log.json";
 const KEYS_PREFIX = "keys/";
 
 export interface OidcProvider {
-  /** OIDC issuer URL (e.g., 'https://accounts.google.com') */
+  /** OIDC issuer URL (must start with "https://") */
   readonly issuerUrl: string;
   /** Client IDs (audiences) to trust from this provider */
   readonly clientIds: string[];
 }
 
-export interface ImmuKVProps {
+/**
+ * Configuration for a single ImmuKV prefix within a bucket.
+ *
+ * Each prefix operates as an independent ImmuKV namespace with its own
+ * lifecycle rules, event notifications, IAM policies, and optional OIDC
+ * federation. Prefixes are isolated at the IAM level — a policy generated
+ * for one prefix does not grant access to another.
+ */
+export interface ImmuKVPrefixConfig {
   /**
-   * Name of the S3 bucket for ImmuKV storage
-   * @default - Auto-generated bucket name
-   */
-  readonly bucketName?: string;
-
-  /**
-   * S3 prefix for all ImmuKV objects
+   * S3 key prefix for this ImmuKV namespace.
    *
    * Controls where ImmuKV stores its data within the S3 bucket:
-   * - Empty string or undefined: Files stored at bucket root (e.g., `_log.json`, `keys/mykey.json`)
-   * - Without trailing slash (e.g., `myapp`): Flat prefix (e.g., `myapp_log.json`, `myappkeys/mykey.json`)
-   * - With trailing slash (e.g., `myapp/`): Directory-style prefix (e.g., `myapp/_log.json`, `myapp/keys/mykey.json`)
+   * - Empty string: Files at bucket root (`_log.json`, `keys/mykey.json`)
+   * - With trailing slash (e.g., `myapp/`): Directory-style (`myapp/_log.json`, `myapp/keys/mykey.json`)
+   * - Without trailing slash (e.g., `myapp`): Flat prefix (`myapp_log.json`, `myappkeys/mykey.json`)
    *
-   * Note: S3 event notifications use prefix matching, so the filter will match any object
-   * starting with `${s3Prefix}_log.json` (e.g., `_log.json`, `_log.json.backup`, etc.).
-   * This is intentional behavior.
-   *
-   * @default - No prefix (root of bucket)
+   * Validation:
+   * - Must not start with `/` or contain `..`
+   * - Must not duplicate another prefix in the same instance
+   * - Must not overlap another prefix (one being a prefix of the other)
+   * - Empty string `""` cannot coexist with other prefixes (it matches all objects)
    */
-  readonly s3Prefix?: string;
+  readonly s3Prefix: string;
 
   /**
-   * Duration to retain old log versions
-   *
-   * If specified, old log versions will be deleted after this duration.
-   * Must be expressible in whole days (e.g., Duration.days(365)).
-   * Can be used independently or combined with logVersionsToRetain.
-   *
-   * @default undefined - No time-based deletion (keep forever)
+   * Duration to retain old log versions for this prefix.
+   * Must be expressible in whole days.
+   * @default undefined — keep forever
    */
   readonly logVersionRetention?: cdk.Duration;
 
   /**
-   * Number of old log versions to retain
-   *
-   * If specified, only this many old log versions will be kept.
-   * Can be used independently or combined with logVersionRetention.
-   *
-   * @default undefined - No count-based deletion (keep all versions)
+   * Number of old log versions to retain for this prefix.
+   * Must be a non-negative integer.
+   * @default undefined — keep all versions
    */
   readonly logVersionsToRetain?: number;
 
   /**
-   * Duration to retain old key object versions
-   *
-   * If specified, old key versions will be deleted after this duration.
-   * Must be expressible in whole days (e.g., Duration.days(180)).
-   * Can be used independently or combined with keyVersionsToRetain.
-   *
-   * @default undefined - No time-based deletion (keep forever)
+   * Duration to retain old key object versions for this prefix.
+   * Must be expressible in whole days.
+   * @default undefined — keep forever
    */
   readonly keyVersionRetention?: cdk.Duration;
 
   /**
-   * Number of old key versions to retain per key
-   *
-   * If specified, only this many old versions will be kept per key.
-   * Can be used independently or combined with keyVersionRetention.
-   *
-   * @default undefined - No count-based deletion (keep all versions)
+   * Number of old key versions to retain per key for this prefix.
+   * Must be a non-negative integer.
+   * @default undefined — keep all versions
    */
   readonly keyVersionsToRetain?: number;
 
   /**
-   * Enable KMS encryption instead of S3-managed encryption
-   * @default false
-   */
-  readonly useKmsEncryption?: boolean;
-
-  /**
-   * Optional notification destination to trigger when log entries are created.
-   * Supports Lambda functions, SNS topics, and SQS queues.
+   * Notification destination triggered when log entries are created
+   * under this prefix. Supports Lambda, SNS, and SQS.
    *
-   * Example with Lambda:
-   * ```ts
-   * import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
-   *
-   * new ImmuKV(this, 'ImmuKV', {
-   *   onLogEntryCreated: new s3n.LambdaDestination(myFunction)
-   * });
-   * ```
-   *
-   * Example with SNS:
-   * ```ts
-   * new ImmuKV(this, 'ImmuKV', {
-   *   onLogEntryCreated: new s3n.SnsDestination(myTopic)
-   * });
-   * ```
-   *
-   * Example with SQS:
-   * ```ts
-   * new ImmuKV(this, 'ImmuKV', {
-   *   onLogEntryCreated: new s3n.SqsDestination(myQueue)
-   * });
-   * ```
-   *
-   * @default - No event notification configured
+   * Event filter matches `${s3Prefix}_log.json` via S3 prefix matching.
+   * @default undefined — no notification
    */
   readonly onLogEntryCreated?: s3.IBucketNotificationDestination;
 
   /**
-   * OIDC identity providers for web identity federation
+   * OIDC identity providers for web identity federation scoped to this prefix.
    *
-   * When specified, creates IAM OIDC providers and a federated IAM role
-   * that allows users authenticated by these providers to assume temporary
-   * AWS credentials via STS AssumeRoleWithWebIdentity.
+   * Creates a federated IAM role whose policies are scoped to this prefix only.
+   * The role receives this prefix's readWritePolicy by default,
+   * or readOnlyPolicy if `oidcReadOnly` is true.
    *
-   * The federated role receives the readWritePolicy by default.
-   * Set `oidcReadOnly: true` to use readOnlyPolicy instead.
-   *
-   * Example with Google:
-   * ```ts
-   * new ImmuKV(this, 'ImmuKV', {
-   *   oidcProviders: [{
-   *     issuerUrl: 'https://accounts.google.com',
-   *     clientIds: ['123456789-abcdef.apps.googleusercontent.com'],
-   *   }],
-   * });
-   * ```
-   *
-   * Example with multiple providers:
-   * ```ts
-   * new ImmuKV(this, 'ImmuKV', {
-   *   oidcProviders: [{
-   *     issuerUrl: 'https://accounts.google.com',
-   *     clientIds: ['google-client-id'],
-   *   }, {
-   *     issuerUrl: 'https://login.microsoftonline.com/tenant-id/v2.0',
-   *     clientIds: ['azure-app-id'],
-   *   }],
-   *   oidcReadOnly: true,  // federated users get read-only access
-   * });
-   * ```
-   *
-   * @default - No OIDC federation configured
+   * @default undefined — no OIDC federation
    */
   readonly oidcProviders?: OidcProvider[];
 
   /**
-   * Whether federated users get read-only access instead of read-write
+   * Whether the federated role gets read-only access instead of read-write.
+   * Only meaningful when `oidcProviders` is set.
    * @default false
    */
   readonly oidcReadOnly?: boolean;
 }
 
 /**
+ * Resources created for a single ImmuKV prefix.
+ */
+export interface ImmuKVPrefixResources {
+  /** The S3 prefix string (as provided in the config) */
+  readonly s3Prefix: string;
+
+  /**
+   * IAM managed policy granting read-write access scoped to this prefix.
+   *
+   * Object actions (GetObject, GetObjectVersion, PutObject, HeadObject)
+   * on `bucketArn/${prefix}*`. Bucket actions (ListBucket, ListBucketVersions)
+   * on `bucketArn` with `s3:prefix` condition.
+   */
+  readonly readWritePolicy: iam.ManagedPolicy;
+
+  /**
+   * IAM managed policy granting read-only access scoped to this prefix.
+   * Same as readWritePolicy but without PutObject.
+   */
+  readonly readOnlyPolicy: iam.ManagedPolicy;
+
+  /**
+   * Federated IAM role for OIDC users scoped to this prefix.
+   * Only present when `oidcProviders` was specified.
+   */
+  readonly federatedRole?: iam.Role;
+}
+
+export interface ImmuKVProps {
+  /**
+   * Name of the S3 bucket.
+   * @default — auto-generated
+   */
+  readonly bucketName?: string;
+
+  /**
+   * Enable KMS encryption instead of S3-managed encryption.
+   * @default false
+   */
+  readonly useKmsEncryption?: boolean;
+
+  /**
+   * Prefix configurations. At least one entry is required.
+   *
+   * Each entry defines an isolated ImmuKV namespace within the shared bucket,
+   * with its own lifecycle rules, event notifications, IAM policies,
+   * and optional OIDC federation.
+   *
+   * @example
+   *
+   * // Single prefix (migration from old API):
+   * new ImmuKV(this, 'Store', {
+   *   prefixes: [{ s3Prefix: '', logVersionRetention: cdk.Duration.days(365) }],
+   * });
+   *
+   * @example
+   *
+   * // Two prefixes with different retention and notifications:
+   * new ImmuKV(this, 'Store', {
+   *   prefixes: [
+   *     { s3Prefix: 'pipeline/', logVersionRetention: cdk.Duration.days(2555),
+   *       onLogEntryCreated: new s3n.LambdaDestination(shadowUpdateFn) },
+   *     { s3Prefix: 'config/', logVersionRetention: cdk.Duration.days(90),
+   *       onLogEntryCreated: new s3n.LambdaDestination(configSyncFn) },
+   *   ],
+   * });
+   */
+  readonly prefixes: ImmuKVPrefixConfig[];
+}
+
+/**
+ * Converts an S3 prefix string to a CDK construct-safe ID suffix.
+ */
+function prefixToConstructId(s3Prefix: string): string {
+  if (s3Prefix === "") return "Root";
+  return s3Prefix
+    .replace(/\/+$/, "")
+    .replace(/[^a-zA-Z0-9]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join("");
+}
+
+/**
  * AWS CDK Construct for ImmuKV infrastructure
  *
- * Creates an S3 bucket with versioning enabled and IAM policies for
- * read/write and read-only access.
+ * Creates an S3 bucket with versioning enabled and per-prefix IAM policies,
+ * lifecycle rules, event notifications, and optional OIDC federation.
  */
 export class ImmuKV extends Construct {
-  /**
-   * The S3 bucket used for ImmuKV storage
-   */
+  /** The S3 bucket shared by all prefixes. */
   public readonly bucket: s3.Bucket;
 
   /**
-   * IAM managed policy for read/write access
+   * Per-prefix resources, keyed by the s3Prefix string.
+   * Use `prefix()` for type-safe access with runtime validation.
    */
-  public readonly readWritePolicy: iam.ManagedPolicy;
+  public readonly prefixes: { [key: string]: ImmuKVPrefixResources };
 
   /**
-   * IAM managed policy for read-only access
+   * Get resources for a specific prefix.
+   * @throws Error if no prefix with that name exists.
+   *
+   * @example
+   * instance.prefix("config/").readWritePolicy
+   * instance.prefix("").readWritePolicy  // root prefix
    */
-  public readonly readOnlyPolicy: iam.ManagedPolicy;
+  public prefix(s3Prefix: string): ImmuKVPrefixResources {
+    const resources = this.prefixes[s3Prefix];
+    if (!resources) {
+      throw new Error(
+        `No prefix "${s3Prefix}" configured. Available: ${Object.keys(
+          this.prefixes,
+        )
+          .map((k) => `"${k}"`)
+          .join(", ")}`,
+      );
+    }
+    return resources;
+  }
 
-  /**
-   * IAM role for OIDC-federated users (if oidcProviders was specified)
-   */
-  public readonly federatedRole?: iam.Role;
-
-  constructor(scope: Construct, id: string, props?: ImmuKVProps) {
+  constructor(scope: Construct, id: string, props: ImmuKVProps) {
     super(scope, id);
 
-    const logVersionRetention = props?.logVersionRetention;
-    const logVersionsToRetain = props?.logVersionsToRetain;
-    const keyVersionRetention = props?.keyVersionRetention;
-    const keyVersionsToRetain = props?.keyVersionsToRetain;
-    const s3Prefix = props?.s3Prefix ?? "";
+    // ── Validation ──
 
-    // Validate retention parameters if provided
-    if (logVersionRetention !== undefined) {
-      const days = logVersionRetention.toDays();
-      if (!Number.isInteger(days) || days <= 0) {
+    // At least one prefix
+    if (props.prefixes.length === 0) {
+      throw new Error("prefixes must contain at least one element");
+    }
+
+    // Duplicate check
+    const seen = new Set<string>();
+    for (const pc of props.prefixes) {
+      if (seen.has(pc.s3Prefix)) {
+        throw new Error(`Duplicate prefix: "${pc.s3Prefix}"`);
+      }
+      seen.add(pc.s3Prefix);
+    }
+
+    // Overlap check: empty string overlaps everything
+    const prefixStrings = props.prefixes.map((p) => p.s3Prefix);
+    if (prefixStrings.includes("") && prefixStrings.length > 1) {
+      throw new Error(
+        'Empty-string prefix ("") cannot coexist with other prefixes — ' +
+          "it matches all objects. Use it alone, or use directory-style " +
+          'prefixes (e.g., "pipeline/") for multi-prefix setups.',
+      );
+    }
+
+    // Overlap check: sorted prefix containment
+    const sorted = [...prefixStrings].sort();
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i + 1]!.startsWith(sorted[i]!)) {
         throw new Error(
-          "logVersionRetention must be expressible as a positive whole number of days",
+          `Overlapping prefixes: "${sorted[i]}" is a prefix of "${sorted[i + 1]}". ` +
+            "S3 lifecycle rules and event notifications for the shorter prefix " +
+            "would unintentionally match objects under the longer prefix.",
         );
       }
     }
-    if (
-      logVersionsToRetain !== undefined &&
-      (logVersionsToRetain < 0 || !Number.isInteger(logVersionsToRetain))
-    ) {
-      throw new Error("logVersionsToRetain must be a non-negative integer");
-    }
-    if (keyVersionRetention !== undefined) {
-      const days = keyVersionRetention.toDays();
-      if (!Number.isInteger(days) || days <= 0) {
+
+    // Construct ID collision check
+    const constructIds = new Map<string, string>();
+    for (const pc of props.prefixes) {
+      const tag = prefixToConstructId(pc.s3Prefix);
+      const existing = constructIds.get(tag);
+      if (existing !== undefined) {
         throw new Error(
-          "keyVersionRetention must be expressible as a positive whole number of days",
+          `Prefixes "${existing}" and "${pc.s3Prefix}" produce the same construct ID "${tag}". ` +
+            "Use prefixes that produce distinct construct IDs.",
         );
       }
-    }
-    if (
-      keyVersionsToRetain !== undefined &&
-      (keyVersionsToRetain < 0 || !Number.isInteger(keyVersionsToRetain))
-    ) {
-      throw new Error("keyVersionsToRetain must be a non-negative integer");
+      constructIds.set(tag, pc.s3Prefix);
     }
 
-    // Validate s3Prefix
-    if (s3Prefix && (s3Prefix.startsWith("/") || s3Prefix.includes(".."))) {
-      throw new Error('s3Prefix must not start with "/" or contain ".."');
+    // Per-prefix validation (format, retention, OIDC)
+    for (const pc of props.prefixes) {
+      const pfx = pc.s3Prefix;
+
+      if (pfx && (pfx.startsWith("/") || pfx.includes(".."))) {
+        throw new Error(
+          `s3Prefix "${pfx}": must not start with "/" or contain ".."`,
+        );
+      }
+
+      if (pc.logVersionRetention !== undefined) {
+        const days = pc.logVersionRetention.toDays();
+        if (!Number.isInteger(days) || days <= 0) {
+          throw new Error(
+            `s3Prefix "${pfx}": logVersionRetention must be expressible as a positive whole number of days`,
+          );
+        }
+      }
+      if (
+        pc.logVersionsToRetain !== undefined &&
+        (pc.logVersionsToRetain < 0 ||
+          !Number.isInteger(pc.logVersionsToRetain))
+      ) {
+        throw new Error(
+          `s3Prefix "${pfx}": logVersionsToRetain must be a non-negative integer`,
+        );
+      }
+      if (pc.keyVersionRetention !== undefined) {
+        const days = pc.keyVersionRetention.toDays();
+        if (!Number.isInteger(days) || days <= 0) {
+          throw new Error(
+            `s3Prefix "${pfx}": keyVersionRetention must be expressible as a positive whole number of days`,
+          );
+        }
+      }
+      if (
+        pc.keyVersionsToRetain !== undefined &&
+        (pc.keyVersionsToRetain < 0 ||
+          !Number.isInteger(pc.keyVersionsToRetain))
+      ) {
+        throw new Error(
+          `s3Prefix "${pfx}": keyVersionsToRetain must be a non-negative integer`,
+        );
+      }
+
+      if (pc.oidcProviders !== undefined && pc.oidcProviders.length > 0) {
+        for (const [i, provider] of pc.oidcProviders.entries()) {
+          if (!provider.issuerUrl.startsWith("https://")) {
+            throw new Error(
+              `s3Prefix "${pfx}": oidcProviders[${i}].issuerUrl must start with "https://", got: ${provider.issuerUrl}`,
+            );
+          }
+          if (provider.clientIds.length === 0) {
+            throw new Error(
+              `s3Prefix "${pfx}": oidcProviders[${i}].clientIds must contain at least one element`,
+            );
+          }
+        }
+      }
     }
 
-    // Build lifecycle rules array conditionally
+    // ── Lifecycle Rules (aggregated before bucket creation) ──
+
     const lifecycleRules: s3.LifecycleRule[] = [];
 
-    // Add log lifecycle rule if any retention parameter is specified
-    if (
-      logVersionRetention !== undefined ||
-      logVersionsToRetain !== undefined
-    ) {
-      lifecycleRules.push({
-        id: "delete-old-log-versions",
-        enabled: true,
-        noncurrentVersionExpiration: logVersionRetention,
-        noncurrentVersionsToRetain: logVersionsToRetain,
-        prefix: `${s3Prefix}${LOG_FILE_PATTERN}`,
-      });
+    for (const pc of props.prefixes) {
+      const pfx = pc.s3Prefix;
+      const tag = prefixToConstructId(pfx);
+
+      if (
+        pc.logVersionRetention !== undefined ||
+        pc.logVersionsToRetain !== undefined
+      ) {
+        lifecycleRules.push({
+          id: `delete-old-log-versions-${tag}`,
+          enabled: true,
+          noncurrentVersionExpiration: pc.logVersionRetention,
+          noncurrentVersionsToRetain: pc.logVersionsToRetain,
+          prefix: `${pfx}${LOG_FILE_PATTERN}`,
+        });
+      }
+
+      if (
+        pc.keyVersionRetention !== undefined ||
+        pc.keyVersionsToRetain !== undefined
+      ) {
+        lifecycleRules.push({
+          id: `delete-old-key-versions-${tag}`,
+          enabled: true,
+          noncurrentVersionExpiration: pc.keyVersionRetention,
+          noncurrentVersionsToRetain: pc.keyVersionsToRetain,
+          prefix: `${pfx}${KEYS_PREFIX}`,
+        });
+      }
     }
 
-    // Add key lifecycle rule if any retention parameter is specified
-    if (
-      keyVersionRetention !== undefined ||
-      keyVersionsToRetain !== undefined
-    ) {
-      lifecycleRules.push({
-        id: "delete-old-key-versions",
-        enabled: true,
-        noncurrentVersionExpiration: keyVersionRetention,
-        noncurrentVersionsToRetain: keyVersionsToRetain,
-        prefix: `${s3Prefix}${KEYS_PREFIX}`,
-      });
-    }
+    // ── Bucket Creation ──
 
-    // S3 Bucket with versioning
     this.bucket = new s3.Bucket(this, "ImmuKVBucket", {
-      bucketName: props?.bucketName,
+      bucketName: props.bucketName,
       versioned: true,
-      encryption: props?.useKmsEncryption
+      encryption: props.useKmsEncryption
         ? s3.BucketEncryption.KMS_MANAGED
         : s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -277,97 +384,120 @@ export class ImmuKV extends Construct {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    // IAM Policy for read/write access (Lambda, EC2, ECS, etc.)
-    this.readWritePolicy = new iam.ManagedPolicy(
-      this,
-      "ImmuKVReadWritePolicy",
-      {
-        statements: [
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            actions: [
-              "s3:GetObject",
-              "s3:GetObjectVersion",
-              "s3:PutObject",
-              "s3:ListBucket",
-              "s3:ListBucketVersions",
-              "s3:HeadObject",
-            ],
-            resources: [this.bucket.bucketArn, `${this.bucket.bucketArn}/*`],
-          }),
-        ],
-      },
-    );
+    // ── Per-Prefix Resource Loop ──
 
-    // IAM Policy for read-only devices (sensors, IoT devices, etc.)
-    this.readOnlyPolicy = new iam.ManagedPolicy(this, "ImmuKVReadOnlyPolicy", {
-      statements: [
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: [
-            "s3:GetObject",
-            "s3:GetObjectVersion",
-            "s3:ListBucket",
-            "s3:ListBucketVersions",
-            "s3:HeadObject",
+    const resourceMap: { [key: string]: ImmuKVPrefixResources } = {};
+
+    for (const pc of props.prefixes) {
+      const pfx = pc.s3Prefix;
+      const tag = prefixToConstructId(pfx);
+
+      // IAM: prefix-scoped object ARN
+      const objectArn = pfx
+        ? `${this.bucket.bucketArn}/${pfx}*`
+        : `${this.bucket.bucketArn}/*`;
+
+      const listCondition = pfx
+        ? { StringLike: { "s3:prefix": `${pfx}*` } }
+        : undefined;
+
+      const readWritePolicy = new iam.ManagedPolicy(
+        this,
+        `ReadWritePolicy-${tag}`,
+        {
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:PutObject",
+                "s3:HeadObject",
+              ],
+              resources: [objectArn],
+            }),
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ["s3:ListBucket", "s3:ListBucketVersions"],
+              resources: [this.bucket.bucketArn],
+              conditions: listCondition,
+            }),
           ],
-          resources: [this.bucket.bucketArn, `${this.bucket.bucketArn}/*`],
-        }),
-      ],
-    });
-
-    // S3 Event Notification (optional)
-    if (props?.onLogEntryCreated) {
-      this.bucket.addEventNotification(
-        s3.EventType.OBJECT_CREATED,
-        props.onLogEntryCreated,
-        { prefix: `${s3Prefix}${LOG_FILE_PATTERN}` },
+        },
       );
-    }
 
-    // OIDC Federation (optional)
-    if (props?.oidcProviders !== undefined && props.oidcProviders.length > 0) {
-      for (const [i, provider] of props.oidcProviders.entries()) {
-        if (!provider.issuerUrl.startsWith("https://")) {
-          throw new Error(
-            `oidcProviders[${i}].issuerUrl must start with "https://", got: ${provider.issuerUrl}`,
-          );
-        }
-        if (provider.clientIds.length === 0) {
-          throw new Error(
-            `oidcProviders[${i}].clientIds must contain at least one element`,
-          );
-        }
+      const readOnlyPolicy = new iam.ManagedPolicy(
+        this,
+        `ReadOnlyPolicy-${tag}`,
+        {
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ["s3:GetObject", "s3:GetObjectVersion", "s3:HeadObject"],
+              resources: [objectArn],
+            }),
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ["s3:ListBucket", "s3:ListBucketVersions"],
+              resources: [this.bucket.bucketArn],
+              conditions: listCondition,
+            }),
+          ],
+        },
+      );
+
+      // S3 notification
+      if (pc.onLogEntryCreated) {
+        this.bucket.addEventNotification(
+          s3.EventType.OBJECT_CREATED,
+          pc.onLogEntryCreated,
+          { prefix: `${pfx}${LOG_FILE_PATTERN}` },
+        );
       }
 
-      const oidcProviders = props.oidcProviders.map(
-        (provider, i) =>
-          new iam.OpenIdConnectProvider(this, `OidcProvider${i}`, {
-            url: provider.issuerUrl,
-            clientIds: provider.clientIds,
-          }),
-      );
+      // OIDC federation
+      let federatedRole: iam.Role | undefined;
 
-      this.federatedRole = new iam.Role(this, "ImmuKVFederatedRole", {
-        assumedBy: new iam.CompositePrincipal(
-          ...oidcProviders.map(
-            (provider, i) =>
-              new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
-                StringEquals: {
-                  [`${props.oidcProviders![i]!.issuerUrl.replace(/^https?:\/\//, "")}:aud`]:
-                    props.oidcProviders![i]!.clientIds,
-                },
-              }),
+      if (pc.oidcProviders !== undefined && pc.oidcProviders.length > 0) {
+        const oidcProviders = pc.oidcProviders.map(
+          (provider, i) =>
+            new iam.OpenIdConnectProvider(this, `OidcProvider-${tag}-${i}`, {
+              url: provider.issuerUrl,
+              clientIds: provider.clientIds,
+            }),
+        );
+
+        federatedRole = new iam.Role(this, `FederatedRole-${tag}`, {
+          assumedBy: new iam.CompositePrincipal(
+            ...oidcProviders.map(
+              (provider, i) =>
+                new iam.WebIdentityPrincipal(
+                  provider.openIdConnectProviderArn,
+                  {
+                    StringEquals: {
+                      [`${pc.oidcProviders![i]!.issuerUrl.replace(/^https?:\/\//, "")}:aud`]:
+                        pc.oidcProviders![i]!.clientIds,
+                    },
+                  },
+                ),
+            ),
           ),
-        ),
-        maxSessionDuration: cdk.Duration.hours(1),
-      });
+          maxSessionDuration: cdk.Duration.hours(1),
+        });
 
-      this.federatedRole.addManagedPolicy(
-        props.oidcReadOnly === true
-          ? this.readOnlyPolicy
-          : this.readWritePolicy,
-      );
+        federatedRole.addManagedPolicy(
+          pc.oidcReadOnly === true ? readOnlyPolicy : readWritePolicy,
+        );
+      }
+
+      resourceMap[pfx] = {
+        s3Prefix: pfx,
+        readWritePolicy,
+        readOnlyPolicy,
+        federatedRole,
+      };
     }
+
+    this.prefixes = resourceMap;
   }
 }

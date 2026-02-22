@@ -18,7 +18,9 @@ describe("ImmuKV", () => {
 
   describe("Basic Construct Creation", () => {
     test("creates S3 bucket with versioning enabled", () => {
-      new ImmuKV(stack, "ImmuKV");
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
       template.hasResourceProperties("AWS::S3::Bucket", {
@@ -29,7 +31,9 @@ describe("ImmuKV", () => {
     });
 
     test("creates S3 bucket with S3-managed encryption by default", () => {
-      new ImmuKV(stack, "ImmuKV");
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
       template.hasResourceProperties("AWS::S3::Bucket", {
@@ -48,6 +52,7 @@ describe("ImmuKV", () => {
     test("creates S3 bucket with KMS encryption when enabled", () => {
       new ImmuKV(stack, "ImmuKV", {
         useKmsEncryption: true,
+        prefixes: [{ s3Prefix: "" }],
       });
       const template = Template.fromStack(stack);
 
@@ -67,6 +72,7 @@ describe("ImmuKV", () => {
     test("creates S3 bucket with custom name", () => {
       new ImmuKV(stack, "ImmuKV", {
         bucketName: "my-custom-bucket",
+        prefixes: [{ s3Prefix: "" }],
       });
       const template = Template.fromStack(stack);
 
@@ -76,7 +82,9 @@ describe("ImmuKV", () => {
     });
 
     test("creates S3 bucket with public access blocked", () => {
-      new ImmuKV(stack, "ImmuKV");
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
       template.hasResourceProperties("AWS::S3::Bucket", {
@@ -90,7 +98,18 @@ describe("ImmuKV", () => {
     });
 
     test("creates exactly one S3 bucket", () => {
-      new ImmuKV(stack, "ImmuKV");
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
+      const template = Template.fromStack(stack);
+
+      template.resourceCountIs("AWS::S3::Bucket", 1);
+    });
+
+    test("creates exactly one S3 bucket even with multiple prefixes", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "pipeline/" }, { s3Prefix: "config/" }],
+      });
       const template = Template.fromStack(stack);
 
       template.resourceCountIs("AWS::S3::Bucket", 1);
@@ -99,7 +118,9 @@ describe("ImmuKV", () => {
 
   describe("Lifecycle Rules", () => {
     test("does not create lifecycle rules by default (unlimited retention)", () => {
-      new ImmuKV(stack, "ImmuKV");
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
       template.hasResourceProperties("AWS::S3::Bucket", {
@@ -109,8 +130,13 @@ describe("ImmuKV", () => {
 
     test("creates lifecycle rule for log versions when explicitly configured", () => {
       new ImmuKV(stack, "ImmuKV", {
-        logVersionRetention: cdk.Duration.days(365),
-        logVersionsToRetain: 1000,
+        prefixes: [
+          {
+            s3Prefix: "",
+            logVersionRetention: cdk.Duration.days(365),
+            logVersionsToRetain: 1000,
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -118,7 +144,7 @@ describe("ImmuKV", () => {
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
             Match.objectLike({
-              Id: "delete-old-log-versions",
+              Id: "delete-old-log-versions-Root",
               Status: "Enabled",
               NoncurrentVersionExpiration: {
                 NoncurrentDays: 365,
@@ -133,8 +159,13 @@ describe("ImmuKV", () => {
 
     test("creates lifecycle rule for key versions when explicitly configured", () => {
       new ImmuKV(stack, "ImmuKV", {
-        keyVersionRetention: cdk.Duration.days(365),
-        keyVersionsToRetain: 100,
+        prefixes: [
+          {
+            s3Prefix: "",
+            keyVersionRetention: cdk.Duration.days(365),
+            keyVersionsToRetain: 100,
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -142,7 +173,7 @@ describe("ImmuKV", () => {
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
             Match.objectLike({
-              Id: "delete-old-key-versions",
+              Id: "delete-old-key-versions-Root",
               Status: "Enabled",
               NoncurrentVersionExpiration: {
                 NoncurrentDays: 365,
@@ -157,8 +188,13 @@ describe("ImmuKV", () => {
 
     test("respects custom log retention settings", () => {
       new ImmuKV(stack, "ImmuKV", {
-        logVersionRetention: cdk.Duration.days(180),
-        logVersionsToRetain: 500,
+        prefixes: [
+          {
+            s3Prefix: "",
+            logVersionRetention: cdk.Duration.days(180),
+            logVersionsToRetain: 500,
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -166,7 +202,7 @@ describe("ImmuKV", () => {
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
             Match.objectLike({
-              Id: "delete-old-log-versions",
+              Id: "delete-old-log-versions-Root",
               NoncurrentVersionExpiration: {
                 NoncurrentDays: 180,
                 NewerNoncurrentVersions: 500,
@@ -179,8 +215,13 @@ describe("ImmuKV", () => {
 
     test("respects custom key retention settings", () => {
       new ImmuKV(stack, "ImmuKV", {
-        keyVersionRetention: cdk.Duration.days(90),
-        keyVersionsToRetain: 50,
+        prefixes: [
+          {
+            s3Prefix: "",
+            keyVersionRetention: cdk.Duration.days(90),
+            keyVersionsToRetain: 50,
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -188,7 +229,7 @@ describe("ImmuKV", () => {
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
             Match.objectLike({
-              Id: "delete-old-key-versions",
+              Id: "delete-old-key-versions-Root",
               NoncurrentVersionExpiration: {
                 NoncurrentDays: 90,
                 NewerNoncurrentVersions: 50,
@@ -201,7 +242,12 @@ describe("ImmuKV", () => {
 
     test("allows only retention days (unlimited version count)", () => {
       new ImmuKV(stack, "ImmuKV", {
-        logVersionRetention: cdk.Duration.days(180),
+        prefixes: [
+          {
+            s3Prefix: "",
+            logVersionRetention: cdk.Duration.days(180),
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -209,7 +255,7 @@ describe("ImmuKV", () => {
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
             Match.objectLike({
-              Id: "delete-old-log-versions",
+              Id: "delete-old-log-versions-Root",
               NoncurrentVersionExpiration: {
                 NoncurrentDays: 180,
               },
@@ -221,7 +267,12 @@ describe("ImmuKV", () => {
 
     test("allows only version count (unlimited retention time)", () => {
       new ImmuKV(stack, "ImmuKV", {
-        keyVersionsToRetain: 50,
+        prefixes: [
+          {
+            s3Prefix: "",
+            keyVersionsToRetain: 50,
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -229,7 +280,7 @@ describe("ImmuKV", () => {
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
             Match.objectLike({
-              Id: "delete-old-key-versions",
+              Id: "delete-old-key-versions-Root",
               NoncurrentVersionExpiration: Match.absent(),
             }),
           ]),
@@ -239,11 +290,15 @@ describe("ImmuKV", () => {
 
     test("applies s3Prefix to lifecycle rules when configured", () => {
       new ImmuKV(stack, "ImmuKV", {
-        s3Prefix: "myapp/",
-        logVersionRetention: cdk.Duration.days(365),
-        logVersionsToRetain: 1000,
-        keyVersionRetention: cdk.Duration.days(365),
-        keyVersionsToRetain: 100,
+        prefixes: [
+          {
+            s3Prefix: "myapp/",
+            logVersionRetention: cdk.Duration.days(365),
+            logVersionsToRetain: 1000,
+            keyVersionRetention: cdk.Duration.days(365),
+            keyVersionsToRetain: 100,
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -251,12 +306,45 @@ describe("ImmuKV", () => {
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
             Match.objectLike({
-              Id: "delete-old-log-versions",
+              Id: "delete-old-log-versions-Myapp",
               Prefix: "myapp/_log.json",
             }),
             Match.objectLike({
-              Id: "delete-old-key-versions",
+              Id: "delete-old-key-versions-Myapp",
               Prefix: "myapp/keys/",
+            }),
+          ]),
+        },
+      });
+    });
+
+    test("creates separate lifecycle rules per prefix", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "pipeline/",
+            logVersionRetention: cdk.Duration.days(2555),
+          },
+          {
+            s3Prefix: "config/",
+            logVersionRetention: cdk.Duration.days(90),
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::S3::Bucket", {
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              Id: "delete-old-log-versions-Pipeline",
+              NoncurrentVersionExpiration: { NoncurrentDays: 2555 },
+              Prefix: "pipeline/_log.json",
+            }),
+            Match.objectLike({
+              Id: "delete-old-log-versions-Config",
+              NoncurrentVersionExpiration: { NoncurrentDays: 90 },
+              Prefix: "config/_log.json",
             }),
           ]),
         },
@@ -265,62 +353,124 @@ describe("ImmuKV", () => {
   });
 
   describe("IAM Policies", () => {
-    test("creates read-write IAM policy", () => {
-      new ImmuKV(stack, "ImmuKV");
+    test("creates read-write IAM policy with two statements for root prefix", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
+      // Read-write policy: object actions + bucket actions in separate statements
       template.hasResourceProperties("AWS::IAM::ManagedPolicy", {
         PolicyDocument: {
-          Statement: Match.arrayWith([
+          Statement: [
             Match.objectLike({
               Effect: "Allow",
               Action: [
                 "s3:GetObject",
                 "s3:GetObjectVersion",
                 "s3:PutObject",
-                "s3:ListBucket",
-                "s3:ListBucketVersions",
                 "s3:HeadObject",
               ],
             }),
-          ]),
-        },
-      });
-    });
-
-    test("creates read-only IAM policy", () => {
-      new ImmuKV(stack, "ImmuKV");
-      const template = Template.fromStack(stack);
-
-      template.hasResourceProperties("AWS::IAM::ManagedPolicy", {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
             Match.objectLike({
               Effect: "Allow",
-              Action: [
-                "s3:GetObject",
-                "s3:GetObjectVersion",
-                "s3:ListBucket",
-                "s3:ListBucketVersions",
-                "s3:HeadObject",
-              ],
+              Action: ["s3:ListBucket", "s3:ListBucketVersions"],
             }),
-          ]),
+          ],
         },
       });
     });
 
-    test("creates exactly two IAM policies", () => {
-      new ImmuKV(stack, "ImmuKV");
+    test("creates read-only IAM policy without PutObject", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
+      const template = Template.fromStack(stack);
+
+      // Read-only policy: no PutObject
+      template.hasResourceProperties("AWS::IAM::ManagedPolicy", {
+        PolicyDocument: {
+          Statement: [
+            Match.objectLike({
+              Effect: "Allow",
+              Action: ["s3:GetObject", "s3:GetObjectVersion", "s3:HeadObject"],
+            }),
+            Match.objectLike({
+              Effect: "Allow",
+              Action: ["s3:ListBucket", "s3:ListBucketVersions"],
+            }),
+          ],
+        },
+      });
+    });
+
+    test("creates exactly two IAM policies for a single prefix", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
       template.resourceCountIs("AWS::IAM::ManagedPolicy", 2);
+    });
+
+    test("creates four IAM policies for two prefixes", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "pipeline/" }, { s3Prefix: "config/" }],
+      });
+      const template = Template.fromStack(stack);
+
+      template.resourceCountIs("AWS::IAM::ManagedPolicy", 4);
+    });
+
+    test("root prefix policies have no s3:prefix condition on ListBucket", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
+      const template = Template.fromStack(stack);
+
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      for (const policy of Object.values(policies)) {
+        const statements = policy.Properties.PolicyDocument.Statement;
+        for (const stmt of statements) {
+          if (
+            Array.isArray(stmt.Action) &&
+            stmt.Action.includes("s3:ListBucket")
+          ) {
+            // Root prefix should have no Condition
+            expect(stmt.Condition).toBeUndefined();
+          }
+        }
+      }
+    });
+
+    test("non-root prefix policies have s3:prefix condition on ListBucket", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "config/" }],
+      });
+      const template = Template.fromStack(stack);
+
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      for (const policy of Object.values(policies)) {
+        const statements = policy.Properties.PolicyDocument.Statement;
+        for (const stmt of statements) {
+          if (
+            Array.isArray(stmt.Action) &&
+            stmt.Action.includes("s3:ListBucket")
+          ) {
+            expect(stmt.Condition).toEqual({
+              StringLike: { "s3:prefix": "config/*" },
+            });
+          }
+        }
+      }
     });
   });
 
   describe("S3 Event Notifications", () => {
     test("does not create Lambda permission when no notification configured", () => {
-      new ImmuKV(stack, "ImmuKV");
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
       template.resourceCountIs("AWS::Lambda::Permission", 0);
@@ -335,14 +485,17 @@ describe("ImmuKV", () => {
         code: lambda.Code.fromInline("def handler(event, context): pass"),
       });
 
-      // Create ImmuKV construct with Lambda notification via the onLogEntryCreated property
       new ImmuKV(stack, "ImmuKV", {
-        onLogEntryCreated: new s3n.LambdaDestination(testFn),
+        prefixes: [
+          {
+            s3Prefix: "",
+            onLogEntryCreated: new s3n.LambdaDestination(testFn),
+          },
+        ],
       });
 
       const template = Template.fromStack(stack);
 
-      // Should create S3 notification configuration
       template.hasResourceProperties("Custom::S3BucketNotifications", {
         NotificationConfiguration: {
           LambdaFunctionConfigurations: Match.arrayWith([
@@ -355,17 +508,19 @@ describe("ImmuKV", () => {
     });
 
     test("configures SNS notification when provided via onLogEntryCreated property", () => {
-      // Create SNS topic in the same stack
       const testTopic = new sns.Topic(stack, "TestTopic");
 
-      // Create ImmuKV construct with SNS notification via the onLogEntryCreated property
       new ImmuKV(stack, "ImmuKV", {
-        onLogEntryCreated: new s3n.SnsDestination(testTopic),
+        prefixes: [
+          {
+            s3Prefix: "",
+            onLogEntryCreated: new s3n.SnsDestination(testTopic),
+          },
+        ],
       });
 
       const template = Template.fromStack(stack);
 
-      // Should configure S3 bucket notifications
       template.hasResourceProperties("Custom::S3BucketNotifications", {
         NotificationConfiguration: {
           TopicConfigurations: Match.arrayWith([
@@ -378,17 +533,19 @@ describe("ImmuKV", () => {
     });
 
     test("configures SQS notification when provided via onLogEntryCreated property", () => {
-      // Create SQS queue in the same stack
       const testQueue = new sqs.Queue(stack, "TestQueue");
 
-      // Create ImmuKV construct with SQS notification via the onLogEntryCreated property
       new ImmuKV(stack, "ImmuKV", {
-        onLogEntryCreated: new s3n.SqsDestination(testQueue),
+        prefixes: [
+          {
+            s3Prefix: "",
+            onLogEntryCreated: new s3n.SqsDestination(testQueue),
+          },
+        ],
       });
 
       const template = Template.fromStack(stack);
 
-      // Should configure S3 bucket notifications
       template.hasResourceProperties("Custom::S3BucketNotifications", {
         NotificationConfiguration: {
           QueueConfigurations: Match.arrayWith([
@@ -408,13 +565,16 @@ describe("ImmuKV", () => {
       });
 
       new ImmuKV(stack, "ImmuKV", {
-        s3Prefix: "myapp/",
-        onLogEntryCreated: new s3n.LambdaDestination(testFn),
+        prefixes: [
+          {
+            s3Prefix: "myapp/",
+            onLogEntryCreated: new s3n.LambdaDestination(testFn),
+          },
+        ],
       });
 
       const template = Template.fromStack(stack);
 
-      // The notification configuration should include the prefix filter
       template.hasResourceProperties("Custom::S3BucketNotifications", {
         NotificationConfiguration: {
           LambdaFunctionConfigurations: [
@@ -435,59 +595,165 @@ describe("ImmuKV", () => {
         },
       });
     });
+
+    test("each prefix can have its own notification destination", () => {
+      const fn1 = new lambda.Function(stack, "Fn1", {
+        runtime: lambda.Runtime.PYTHON_3_11,
+        handler: "index.handler",
+        code: lambda.Code.fromInline("def handler(event, context): pass"),
+      });
+      const fn2 = new lambda.Function(stack, "Fn2", {
+        runtime: lambda.Runtime.PYTHON_3_11,
+        handler: "index.handler",
+        code: lambda.Code.fromInline("def handler(event, context): pass"),
+      });
+
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "pipeline/",
+            onLogEntryCreated: new s3n.LambdaDestination(fn1),
+          },
+          {
+            s3Prefix: "config/",
+            onLogEntryCreated: new s3n.LambdaDestination(fn2),
+          },
+        ],
+      });
+
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("Custom::S3BucketNotifications", {
+        NotificationConfiguration: {
+          LambdaFunctionConfigurations: Match.arrayWith([
+            Match.objectLike({
+              Filter: {
+                Key: {
+                  FilterRules: [
+                    { Name: "prefix", Value: "pipeline/_log.json" },
+                  ],
+                },
+              },
+            }),
+            Match.objectLike({
+              Filter: {
+                Key: {
+                  FilterRules: [{ Name: "prefix", Value: "config/_log.json" }],
+                },
+              },
+            }),
+          ]),
+        },
+      });
+    });
   });
 
   describe("Public Properties", () => {
     test("exposes bucket as public property", () => {
-      const immukv = new ImmuKV(stack, "ImmuKV");
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
 
       expect(immukv.bucket).toBeDefined();
       expect(immukv.bucket).toBeInstanceOf(s3.Bucket);
     });
 
-    test("exposes readWritePolicy as public property", () => {
-      const immukv = new ImmuKV(stack, "ImmuKV");
+    test("exposes prefixes object", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
 
-      expect(immukv.readWritePolicy).toBeDefined();
+      expect(immukv.prefixes).toBeDefined();
+      expect(Object.keys(immukv.prefixes).length).toBe(1);
+      expect("" in immukv.prefixes).toBe(true);
     });
 
-    test("exposes readOnlyPolicy as public property", () => {
-      const immukv = new ImmuKV(stack, "ImmuKV");
+    test("prefixes object contains correct keys for multi-prefix", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "pipeline/" }, { s3Prefix: "config/" }],
+      });
 
-      expect(immukv.readOnlyPolicy).toBeDefined();
+      expect(Object.keys(immukv.prefixes).length).toBe(2);
+      expect("pipeline/" in immukv.prefixes).toBe(true);
+      expect("config/" in immukv.prefixes).toBe(true);
+    });
+
+    test("prefix() returns resources for valid prefix", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
+
+      const resources = immukv.prefix("");
+      expect(resources.s3Prefix).toBe("");
+      expect(resources.readWritePolicy).toBeDefined();
+      expect(resources.readOnlyPolicy).toBeDefined();
+    });
+
+    test("prefix() throws for non-existent prefix", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "pipeline/" }],
+      });
+
+      expect(() => immukv.prefix("config/")).toThrow(
+        'No prefix "config/" configured. Available: "pipeline/"',
+      );
+    });
+
+    test("prefix resources include s3Prefix string", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "config/" }],
+      });
+
+      expect(immukv.prefix("config/").s3Prefix).toBe("config/");
     });
   });
 
   describe("Input Validation", () => {
+    test("throws error when prefixes array is empty", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [],
+        });
+      }).toThrow("prefixes must contain at least one element");
+    });
+
     test("throws error when s3Prefix starts with /", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          s3Prefix: "/invalid",
+          prefixes: [{ s3Prefix: "/invalid" }],
         });
-      }).toThrow('s3Prefix must not start with "/" or contain ".."');
+      }).toThrow(
+        's3Prefix "/invalid": must not start with "/" or contain ".."',
+      );
     });
 
     test("throws error when s3Prefix contains ..", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          s3Prefix: "invalid/../path",
+          prefixes: [{ s3Prefix: "invalid/../path" }],
         });
-      }).toThrow('s3Prefix must not start with "/" or contain ".."');
+      }).toThrow(
+        's3Prefix "invalid/../path": must not start with "/" or contain ".."',
+      );
     });
 
     test("accepts s3Prefix ending with / (directory prefix)", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          s3Prefix: "myapp/",
+          prefixes: [{ s3Prefix: "myapp/" }],
         });
       }).not.toThrow();
     });
 
     test("accepts s3Prefix without trailing slash (flat prefix)", () => {
       new ImmuKV(stack, "ImmuKV-Flat", {
-        s3Prefix: "myapp",
-        logVersionRetention: cdk.Duration.days(365),
-        logVersionsToRetain: 1000,
+        prefixes: [
+          {
+            s3Prefix: "myapp",
+            logVersionRetention: cdk.Duration.days(365),
+            logVersionsToRetain: 1000,
+          },
+        ],
       });
       const template = Template.fromStack(stack);
 
@@ -506,7 +772,7 @@ describe("ImmuKV", () => {
     test("accepts valid s3Prefix", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          s3Prefix: "valid-prefix",
+          prefixes: [{ s3Prefix: "valid-prefix" }],
         });
       }).not.toThrow();
     });
@@ -514,9 +780,68 @@ describe("ImmuKV", () => {
     test("accepts empty s3Prefix", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          s3Prefix: "",
+          prefixes: [{ s3Prefix: "" }],
         });
       }).not.toThrow();
+    });
+  });
+
+  describe("Prefix Overlap Validation", () => {
+    test("throws error for duplicate prefixes", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "config/" }, { s3Prefix: "config/" }],
+        });
+      }).toThrow('Duplicate prefix: "config/"');
+    });
+
+    test("throws error when empty prefix coexists with others", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "" }, { s3Prefix: "config/" }],
+        });
+      }).toThrow('Empty-string prefix ("") cannot coexist with other prefixes');
+    });
+
+    test("throws error for overlapping prefixes (parent/child)", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "data/" }, { s3Prefix: "data/subset/" }],
+        });
+      }).toThrow('Overlapping prefixes: "data/" is a prefix of "data/subset/"');
+    });
+
+    test("allows non-overlapping prefixes", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "pipeline/" }, { s3Prefix: "config/" }],
+        });
+      }).not.toThrow();
+    });
+
+    test('allows "a/" and "ab/" (not overlapping)', () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "a/" }, { s3Prefix: "ab/" }],
+        });
+      }).not.toThrow();
+    });
+
+    test("allows single root prefix alone", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "" }],
+        });
+      }).not.toThrow();
+    });
+
+    test("throws error for construct ID collision", () => {
+      // Both would produce the same construct ID
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "my-app/" }, { s3Prefix: "my_app/" }],
+        });
+      }).toThrow('produce the same construct ID "MyApp"');
     });
   });
 
@@ -524,7 +849,12 @@ describe("ImmuKV", () => {
     test("throws error when logVersionRetention is zero days", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          logVersionRetention: cdk.Duration.days(0),
+          prefixes: [
+            {
+              s3Prefix: "",
+              logVersionRetention: cdk.Duration.days(0),
+            },
+          ],
         });
       }).toThrow(
         "logVersionRetention must be expressible as a positive whole number of days",
@@ -534,7 +864,12 @@ describe("ImmuKV", () => {
     test("throws error when logVersionRetention is negative days", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          logVersionRetention: cdk.Duration.days(-1),
+          prefixes: [
+            {
+              s3Prefix: "",
+              logVersionRetention: cdk.Duration.days(-1),
+            },
+          ],
         });
       }).toThrow("Duration amounts cannot be negative");
     });
@@ -542,7 +877,12 @@ describe("ImmuKV", () => {
     test("throws error when logVersionRetention has fractional days", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          logVersionRetention: cdk.Duration.hours(36), // 1.5 days
+          prefixes: [
+            {
+              s3Prefix: "",
+              logVersionRetention: cdk.Duration.hours(36), // 1.5 days
+            },
+          ],
         });
       }).toThrow("cannot be converted into a whole number of days");
     });
@@ -550,7 +890,12 @@ describe("ImmuKV", () => {
     test("throws error when logVersionsToRetain is negative", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          logVersionsToRetain: -1,
+          prefixes: [
+            {
+              s3Prefix: "",
+              logVersionsToRetain: -1,
+            },
+          ],
         });
       }).toThrow("logVersionsToRetain must be a non-negative integer");
     });
@@ -558,7 +903,12 @@ describe("ImmuKV", () => {
     test("throws error when logVersionsToRetain is not an integer", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          logVersionsToRetain: 10.5,
+          prefixes: [
+            {
+              s3Prefix: "",
+              logVersionsToRetain: 10.5,
+            },
+          ],
         });
       }).toThrow("logVersionsToRetain must be a non-negative integer");
     });
@@ -566,7 +916,12 @@ describe("ImmuKV", () => {
     test("accepts zero for logVersionsToRetain", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          logVersionsToRetain: 0,
+          prefixes: [
+            {
+              s3Prefix: "",
+              logVersionsToRetain: 0,
+            },
+          ],
         });
       }).not.toThrow();
     });
@@ -574,7 +929,12 @@ describe("ImmuKV", () => {
     test("throws error when keyVersionRetention is zero days", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          keyVersionRetention: cdk.Duration.days(0),
+          prefixes: [
+            {
+              s3Prefix: "",
+              keyVersionRetention: cdk.Duration.days(0),
+            },
+          ],
         });
       }).toThrow(
         "keyVersionRetention must be expressible as a positive whole number of days",
@@ -584,7 +944,12 @@ describe("ImmuKV", () => {
     test("throws error when keyVersionRetention is negative days", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          keyVersionRetention: cdk.Duration.days(-1),
+          prefixes: [
+            {
+              s3Prefix: "",
+              keyVersionRetention: cdk.Duration.days(-1),
+            },
+          ],
         });
       }).toThrow("Duration amounts cannot be negative");
     });
@@ -592,7 +957,12 @@ describe("ImmuKV", () => {
     test("throws error when keyVersionRetention has fractional days", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          keyVersionRetention: cdk.Duration.hours(73), // 3.04 days (fractional)
+          prefixes: [
+            {
+              s3Prefix: "",
+              keyVersionRetention: cdk.Duration.hours(73), // 3.04 days
+            },
+          ],
         });
       }).toThrow("cannot be converted into a whole number of days");
     });
@@ -600,7 +970,12 @@ describe("ImmuKV", () => {
     test("throws error when keyVersionsToRetain is negative", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          keyVersionsToRetain: -1,
+          prefixes: [
+            {
+              s3Prefix: "",
+              keyVersionsToRetain: -1,
+            },
+          ],
         });
       }).toThrow("keyVersionsToRetain must be a non-negative integer");
     });
@@ -608,7 +983,12 @@ describe("ImmuKV", () => {
     test("throws error when keyVersionsToRetain is not an integer", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          keyVersionsToRetain: 5.5,
+          prefixes: [
+            {
+              s3Prefix: "",
+              keyVersionsToRetain: 5.5,
+            },
+          ],
         });
       }).toThrow("keyVersionsToRetain must be a non-negative integer");
     });
@@ -616,7 +996,12 @@ describe("ImmuKV", () => {
     test("accepts zero for keyVersionsToRetain", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          keyVersionsToRetain: 0,
+          prefixes: [
+            {
+              s3Prefix: "",
+              keyVersionsToRetain: 0,
+            },
+          ],
         });
       }).not.toThrow();
     });
@@ -624,22 +1009,45 @@ describe("ImmuKV", () => {
     test("accepts positive retention values", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          logVersionRetention: cdk.Duration.days(90),
-          logVersionsToRetain: 500,
-          keyVersionRetention: cdk.Duration.days(30),
-          keyVersionsToRetain: 50,
+          prefixes: [
+            {
+              s3Prefix: "",
+              logVersionRetention: cdk.Duration.days(90),
+              logVersionsToRetain: 500,
+              keyVersionRetention: cdk.Duration.days(30),
+              keyVersionsToRetain: 50,
+            },
+          ],
         });
       }).not.toThrow();
+    });
+
+    test("validation error messages include prefix for context", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [
+            {
+              s3Prefix: "myapp/",
+              logVersionsToRetain: -1,
+            },
+          ],
+        });
+      }).toThrow('s3Prefix "myapp/": logVersionsToRetain');
     });
   });
 
   describe("OIDC Federation", () => {
-    test("creates OIDC provider resource when oidcProviders is specified", () => {
+    test("creates OIDC provider resource when oidcProviders is specified on a prefix", () => {
       new ImmuKV(stack, "ImmuKV", {
-        oidcProviders: [
+        prefixes: [
           {
-            issuerUrl: "https://accounts.google.com",
-            clientIds: ["my-client-id.apps.googleusercontent.com"],
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id.apps.googleusercontent.com"],
+              },
+            ],
           },
         ],
       });
@@ -656,10 +1064,15 @@ describe("ImmuKV", () => {
 
     test("creates federated role with correct trust policy (hostname-only condition key)", () => {
       new ImmuKV(stack, "ImmuKV", {
-        oidcProviders: [
+        prefixes: [
           {
-            issuerUrl: "https://accounts.google.com",
-            clientIds: ["my-client-id"],
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
           },
         ],
       });
@@ -685,17 +1098,22 @@ describe("ImmuKV", () => {
 
     test("attaches read-only policy when oidcReadOnly is true", () => {
       new ImmuKV(stack, "ImmuKV", {
-        oidcProviders: [
+        prefixes: [
           {
-            issuerUrl: "https://accounts.google.com",
-            clientIds: ["my-client-id"],
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
+            oidcReadOnly: true,
           },
         ],
-        oidcReadOnly: true,
       });
       const template = Template.fromStack(stack);
 
-      // Find the federated role (identified by WebIdentity trust policy)
+      // Find the federated role
       const roles = template.findResources("AWS::IAM::Role");
       const policies = template.findResources("AWS::IAM::ManagedPolicy");
       const federatedRoleEntry = Object.values(roles).find((r) =>
@@ -711,25 +1129,30 @@ describe("ImmuKV", () => {
         .ManagedPolicyArns as Array<{ Ref: string }>;
       expect(roleManagedPolicyArns.length).toBe(1);
       const attachedPolicy = policies[roleManagedPolicyArns[0]!.Ref];
-      const actions =
+      // Read-only: first statement should NOT have PutObject
+      const firstStatementActions =
         attachedPolicy!.Properties.PolicyDocument.Statement[0].Action;
-      expect(actions).not.toContain("s3:PutObject");
-      expect(actions).toContain("s3:GetObject");
-      expect(actions).toContain("s3:ListBucket");
+      expect(firstStatementActions).not.toContain("s3:PutObject");
+      expect(firstStatementActions).toContain("s3:GetObject");
     });
 
     test("attaches read-write policy by default (oidcReadOnly not set)", () => {
       new ImmuKV(stack, "ImmuKV", {
-        oidcProviders: [
+        prefixes: [
           {
-            issuerUrl: "https://accounts.google.com",
-            clientIds: ["my-client-id"],
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
           },
         ],
       });
       const template = Template.fromStack(stack);
 
-      // Find the federated role (identified by WebIdentity trust policy)
+      // Find the federated role
       const roles = template.findResources("AWS::IAM::Role");
       const policies = template.findResources("AWS::IAM::ManagedPolicy");
       const federatedRoleEntry = Object.values(roles).find((r) =>
@@ -745,42 +1168,53 @@ describe("ImmuKV", () => {
         .ManagedPolicyArns as Array<{ Ref: string }>;
       expect(roleManagedPolicyArns.length).toBe(1);
       const attachedPolicy = policies[roleManagedPolicyArns[0]!.Ref];
-      const actions =
+      const firstStatementActions =
         attachedPolicy!.Properties.PolicyDocument.Statement[0].Action;
-      expect(actions).toContain("s3:PutObject");
-      expect(actions).toContain("s3:GetObject");
-      expect(actions).toContain("s3:ListBucket");
+      expect(firstStatementActions).toContain("s3:PutObject");
+      expect(firstStatementActions).toContain("s3:GetObject");
     });
 
-    test("exposes federatedRole property when oidcProviders specified", () => {
+    test("exposes federatedRole property when oidcProviders specified on prefix", () => {
       const immukv = new ImmuKV(stack, "ImmuKV", {
-        oidcProviders: [
+        prefixes: [
           {
-            issuerUrl: "https://accounts.google.com",
-            clientIds: ["my-client-id"],
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
           },
         ],
       });
 
-      expect(immukv.federatedRole).toBeDefined();
+      expect(immukv.prefix("").federatedRole).toBeDefined();
     });
 
     test("federatedRole is undefined when oidcProviders is not specified", () => {
-      const immukv = new ImmuKV(stack, "ImmuKV");
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
 
-      expect(immukv.federatedRole).toBeUndefined();
+      expect(immukv.prefix("").federatedRole).toBeUndefined();
     });
 
-    test("multiple OIDC providers create multiple resources but one shared role", () => {
+    test("multiple OIDC providers create multiple resources but one shared role per prefix", () => {
       new ImmuKV(stack, "ImmuKV", {
-        oidcProviders: [
+        prefixes: [
           {
-            issuerUrl: "https://accounts.google.com",
-            clientIds: ["google-client-id"],
-          },
-          {
-            issuerUrl: "https://login.microsoftonline.com/tenant-id/v2.0",
-            clientIds: ["azure-app-id"],
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["google-client-id"],
+              },
+              {
+                issuerUrl: "https://login.microsoftonline.com/tenant-id/v2.0",
+                clientIds: ["azure-app-id"],
+              },
+            ],
           },
         ],
       });
@@ -789,7 +1223,7 @@ describe("ImmuKV", () => {
       // Two OIDC provider resources
       template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 2);
 
-      // Exactly one federated role (CDK also creates service roles for custom resources)
+      // Exactly one federated role
       const roles = template.findResources("AWS::IAM::Role");
       const federatedRoles = Object.values(roles).filter((r) =>
         r.Properties.AssumeRolePolicyDocument?.Statement?.some(
@@ -827,10 +1261,15 @@ describe("ImmuKV", () => {
     test("throws error when issuerUrl does not start with https://", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          oidcProviders: [
+          prefixes: [
             {
-              issuerUrl: "http://accounts.google.com",
-              clientIds: ["my-client-id"],
+              s3Prefix: "",
+              oidcProviders: [
+                {
+                  issuerUrl: "http://accounts.google.com",
+                  clientIds: ["my-client-id"],
+                },
+              ],
             },
           ],
         });
@@ -842,10 +1281,15 @@ describe("ImmuKV", () => {
     test("throws error when issuerUrl is a bare string without scheme", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          oidcProviders: [
+          prefixes: [
             {
-              issuerUrl: "accounts.google.com",
-              clientIds: ["my-client-id"],
+              s3Prefix: "",
+              oidcProviders: [
+                {
+                  issuerUrl: "accounts.google.com",
+                  clientIds: ["my-client-id"],
+                },
+              ],
             },
           ],
         });
@@ -855,10 +1299,15 @@ describe("ImmuKV", () => {
     test("throws error when clientIds is empty", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          oidcProviders: [
+          prefixes: [
             {
-              issuerUrl: "https://accounts.google.com",
-              clientIds: [],
+              s3Prefix: "",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: [],
+                },
+              ],
             },
           ],
         });
@@ -870,14 +1319,19 @@ describe("ImmuKV", () => {
     test("throws error with correct index for second provider validation failure", () => {
       expect(() => {
         new ImmuKV(stack, "ImmuKV", {
-          oidcProviders: [
+          prefixes: [
             {
-              issuerUrl: "https://accounts.google.com",
-              clientIds: ["valid-id"],
-            },
-            {
-              issuerUrl: "http://invalid.example.com",
-              clientIds: ["some-id"],
+              s3Prefix: "",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: ["valid-id"],
+                },
+                {
+                  issuerUrl: "http://invalid.example.com",
+                  clientIds: ["some-id"],
+                },
+              ],
             },
           ],
         });
@@ -887,7 +1341,9 @@ describe("ImmuKV", () => {
     });
 
     test("does not create OIDC resources when oidcProviders is not specified", () => {
-      new ImmuKV(stack, "ImmuKV");
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
       const template = Template.fromStack(stack);
 
       template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 0);
@@ -896,12 +1352,91 @@ describe("ImmuKV", () => {
 
     test("does not create OIDC resources when oidcProviders is empty array", () => {
       new ImmuKV(stack, "ImmuKV", {
-        oidcProviders: [],
+        prefixes: [{ s3Prefix: "", oidcProviders: [] }],
       });
       const template = Template.fromStack(stack);
 
       template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 0);
       template.resourceCountIs("AWS::IAM::Role", 0);
+    });
+
+    test("per-prefix OIDC: each prefix gets its own federated role", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "pipeline/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["pipeline-client"],
+              },
+            ],
+          },
+          {
+            s3Prefix: "config/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["config-client"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Two federated roles (one per prefix)
+      const roles = template.findResources("AWS::IAM::Role");
+      const federatedRoles = Object.values(roles).filter((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoles.length).toBe(2);
+    });
+  });
+
+  describe("Multi-Prefix Integration", () => {
+    test("complete multi-prefix setup produces correct resource counts", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "pipeline/",
+            logVersionRetention: cdk.Duration.days(2555),
+          },
+          {
+            s3Prefix: "config/",
+            logVersionRetention: cdk.Duration.days(90),
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["config-client"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // 1 bucket
+      template.resourceCountIs("AWS::S3::Bucket", 1);
+      // 4 managed policies (2 per prefix)
+      template.resourceCountIs("AWS::IAM::ManagedPolicy", 4);
+      // 1 OIDC provider (only config/ has OIDC)
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 1);
+    });
+
+    test("prefix() returns distinct policies per prefix", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "pipeline/" }, { s3Prefix: "config/" }],
+      });
+
+      const pipeline = immukv.prefix("pipeline/");
+      const config = immukv.prefix("config/");
+
+      expect(pipeline.readWritePolicy).not.toBe(config.readWritePolicy);
+      expect(pipeline.readOnlyPolicy).not.toBe(config.readOnlyPolicy);
     });
   });
 });
