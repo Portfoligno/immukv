@@ -1528,6 +1528,72 @@ describe("ImmuKV", () => {
         'OIDC provider conflict: issuerUrl "https://accounts.google.com" is referenced by multiple prefixes with different clientIds',
       );
     });
+
+    test("URL variants (trailing slash, casing, default port) deduplicate to one provider", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "pipeline/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://Accounts.Google.Com:443",
+                clientIds: ["shared-client"],
+              },
+            ],
+          },
+          {
+            s3Prefix: "config/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com/",
+                clientIds: ["shared-client"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Only one OIDC provider (URL variants normalized to the same key)
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 1);
+
+      // Two federated roles (one per prefix)
+      const roles = template.findResources("AWS::IAM::Role");
+      const federatedRoles = Object.values(roles).filter((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoles.length).toBe(2);
+    });
+
+    test("throws for conflicting clientIds even when issuerUrl variants differ only cosmetically", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [
+            {
+              s3Prefix: "pipeline/",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: ["client-a"],
+                },
+              ],
+            },
+            {
+              s3Prefix: "config/",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://Accounts.Google.Com:443/",
+                  clientIds: ["client-b"],
+                },
+              ],
+            },
+          ],
+        });
+      }).toThrow("OIDC provider conflict");
+    });
   });
 
   describe("Multi-Prefix Integration", () => {

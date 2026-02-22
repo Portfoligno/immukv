@@ -4159,7 +4159,7 @@
         },
         "locationInModule": {
           "filename": "src/immukv.ts",
-          "line": 223
+          "line": 237
         },
         "parameters": [
           {
@@ -4185,7 +4185,7 @@
       "kind": "class",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 191
+        "line": 205
       },
       "methods": [
         {
@@ -4199,7 +4199,7 @@
           },
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 209
+            "line": 223
           },
           "name": "prefix",
           "parameters": [
@@ -4227,7 +4227,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 193
+            "line": 207
           },
           "name": "bucket",
           "type": {
@@ -4243,7 +4243,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 199
+            "line": 213
           },
           "name": "prefixes",
           "type": {
@@ -4650,5 +4650,5 @@
     }
   },
   "version": "0.1.24-dev.0",
-  "fingerprint": "xu/eMLsBTFmIz1Q+jEWstJ+Otx6jPh884JywvyX8w8g="
+  "fingerprint": "0XAAgMsa6M8BSOjIbjgmeoOubStXEPmcFr8WSQdmiaY="
 }

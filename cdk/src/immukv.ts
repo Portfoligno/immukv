@@ -169,6 +169,20 @@ export interface ImmuKVProps {
 }
 
 /**
+ * Normalizes an OIDC issuer URL for use as a deduplication key.
+ *
+ * The URL constructor reliably lowercases the hostname, removes the
+ * default HTTPS port (:443), and normalizes the path (adds trailing
+ * slash to bare origins). This prevents deploy-time collisions in
+ * AWS IAM where variants like `https://Accounts.Google.Com:443` and
+ * `https://accounts.google.com/` would be treated as different
+ * providers during synth but collide at the API level.
+ */
+function normalizeIssuerUrl(issuerUrl: string): string {
+  return new URL(issuerUrl).href;
+}
+
+/**
  * Converts an S3 prefix string to a CDK construct-safe ID suffix.
  */
 function prefixToConstructId(s3Prefix: string): string {
@@ -336,12 +350,15 @@ export class ImmuKV extends Construct {
       }
     }
 
-    // OIDC cross-prefix conflict check: same issuerUrl must have same clientIds
+    // OIDC cross-prefix conflict check: same issuerUrl must have same clientIds.
+    // Normalize issuer URLs so that cosmetic variants (trailing slash,
+    // mixed case, default port) are detected as the same provider.
     const oidcClientIdsByIssuer = new Map<string, string[]>();
     for (const pc of props.prefixes) {
       if (pc.oidcProviders === undefined) continue;
       for (const provider of pc.oidcProviders) {
-        const existing = oidcClientIdsByIssuer.get(provider.issuerUrl);
+        const normalizedUrl = normalizeIssuerUrl(provider.issuerUrl);
+        const existing = oidcClientIdsByIssuer.get(normalizedUrl);
         if (existing !== undefined) {
           const sortedExisting = [...existing].sort();
           const sortedNew = [...provider.clientIds].sort();
@@ -356,7 +373,7 @@ export class ImmuKV extends Construct {
             );
           }
         } else {
-          oidcClientIdsByIssuer.set(provider.issuerUrl, provider.clientIds);
+          oidcClientIdsByIssuer.set(normalizedUrl, provider.clientIds);
         }
       }
     }
@@ -418,9 +435,10 @@ export class ImmuKV extends Construct {
     for (const pc of props.prefixes) {
       if (pc.oidcProviders === undefined) continue;
       for (const provider of pc.oidcProviders) {
-        if (!oidcProviderMap.has(provider.issuerUrl)) {
+        const normalizedUrl = normalizeIssuerUrl(provider.issuerUrl);
+        if (!oidcProviderMap.has(normalizedUrl)) {
           oidcProviderMap.set(
-            provider.issuerUrl,
+            normalizedUrl,
             new iam.OpenIdConnectProvider(
               this,
               `OidcProvider-${oidcProviderIndex}`,
@@ -511,7 +529,7 @@ export class ImmuKV extends Construct {
 
       if (pc.oidcProviders !== undefined && pc.oidcProviders.length > 0) {
         const resolvedProviders = pc.oidcProviders.map(
-          (p) => oidcProviderMap.get(p.issuerUrl)!,
+          (p) => oidcProviderMap.get(normalizeIssuerUrl(p.issuerUrl))!,
         );
 
         federatedRole = new iam.Role(this, `FederatedRole-${tag}`, {
