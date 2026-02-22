@@ -32,6 +32,12 @@ console.log(`Committed: ${entry.versionId}`);
 const latest = await client.get('key1');
 console.log('Latest:', latest.value);
 
+// List keys
+const keys = await client.listKeys(undefined, 100);
+
+// List keys with prefix filtering (server-side)
+const sensorKeys = await client.listKeysWithPrefix('sensor-', undefined, 100);
+
 await client.close();
 ```
 
@@ -42,5 +48,42 @@ await client.close();
 - **Hash chain** - Cryptographic integrity verification
 - **No database** - Uses S3 versioning only
 - **Auto-repair** - Orphaned entries repaired automatically
+- **Credential providers** - Pluggable async credential refresh via `CredentialProvider`
+
+## Credential Providers
+
+The client supports static credentials or an async credential provider for dynamic credential refresh (e.g., OIDC federation).
+
+```typescript
+import { Config, CredentialProvider, StaticCredentials } from 'immukv';
+
+// Static credentials
+const config: Config = {
+  s3Bucket: 'bucket',
+  s3Region: 'us-east-1',
+  s3Prefix: '',
+  overrides: {
+    credentials: {
+      accessKeyId: 'AKIA...',
+      secretAccessKey: '...',
+      sessionToken: '...',
+    },
+  },
+};
+
+// Async credential provider
+const provider: CredentialProvider = async () => ({
+  accessKeyId: 'AKIA...',
+  secretAccessKey: '...',
+  sessionToken: '...',
+});
+
+const configWithProvider: Config = {
+  s3Bucket: 'bucket',
+  s3Region: 'us-east-1',
+  s3Prefix: '',
+  overrides: { credentials: provider },
+};
+```
 
 See the [full documentation](../README.md) for more details.

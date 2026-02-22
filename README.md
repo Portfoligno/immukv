@@ -167,6 +167,8 @@ s3://your-bucket/
 
 ```python
 # Python
+from immukv import Config, S3Overrides, S3Credentials
+
 config = Config(
     s3_bucket="bucket-name",
     s3_region="us-east-1",
@@ -174,7 +176,11 @@ config = Config(
     kms_key_id=None,  # Optional KMS encryption
     repair_check_interval_ms=300000,  # 5 minutes
     read_only=False,  # Set True to disable writes
-    overrides=None  # Optional S3Overrides(endpoint_url, credentials, force_path_style)
+    overrides=S3Overrides(
+        endpoint_url=None,  # Custom S3 endpoint
+        credentials=None,   # S3Credentials or async CredentialProvider
+        force_path_style=False,  # Required for MinIO
+    )
 )
 ```
 
@@ -184,10 +190,59 @@ const config: Config = {
   s3Bucket: 'bucket-name',
   s3Region: 'us-east-1',
   s3Prefix: '',
-  // kmsKeyId: 'optional-key-id',  // Optional KMS encryption
+  // kmsKeyId: 'optional-key-id',
   repairCheckIntervalMs: 300000,  // 5 minutes
-  readOnly: false,  // Set true to disable writes
-  // overrides: { endpointUrl?, credentials?, forcePathStyle? }
+  readOnly: false,
+  // overrides: {
+  //   endpointUrl?: string,
+  //   credentials?: StaticCredentials | CredentialProvider,
+  //   forcePathStyle?: boolean,
+  // }
+};
+```
+
+### Credential Providers
+
+Both clients support pluggable credential providers for dynamic credential refresh (e.g., OIDC federation, custom STS flows).
+
+```python
+# Python - async credential provider
+from immukv import S3Credentials, Config, S3Overrides
+
+async def my_credential_provider() -> S3Credentials:
+    # Fetch credentials from your identity provider
+    return S3Credentials(
+        aws_access_key_id="AKIA...",
+        aws_secret_access_key="...",
+        aws_session_token="...",       # Optional
+        expires_at=some_datetime,      # Optional (defaults to 1 hour from now)
+    )
+
+config = Config(
+    s3_bucket="bucket-name",
+    s3_region="us-east-1",
+    s3_prefix="",
+    overrides=S3Overrides(credentials=my_credential_provider),
+)
+```
+
+```typescript
+// TypeScript - async credential provider
+import { Config, CredentialProvider } from 'immukv';
+
+const myCredentialProvider: CredentialProvider = async () => ({
+  accessKeyId: 'AKIA...',
+  secretAccessKey: '...',
+  sessionToken: '...',  // Optional
+});
+
+const config: Config = {
+  s3Bucket: 'bucket-name',
+  s3Region: 'us-east-1',
+  s3Prefix: '',
+  overrides: {
+    credentials: myCredentialProvider,
+  },
 };
 ```
 
@@ -233,6 +288,18 @@ Lists all keys in lexicographic order.
 keys = client.list_keys(None, 100)
 ```
 
+#### `list_keys_with_prefix(prefix, after_key, limit)` - List Keys by Prefix
+
+Lists keys matching the given prefix (lexicographic order). Filtering is done server-side.
+
+```python
+keys = client.list_keys_with_prefix("sensor-", None, 100)
+```
+
+```typescript
+const keys = await client.listKeysWithPrefix('sensor-', undefined, 100);
+```
+
 #### `verify(entry)` - Verify Entry
 
 Verifies hash integrity of single entry.
@@ -253,19 +320,19 @@ is_valid = client.verify_log_chain(100)
 
 ### What This System Guarantees
 
-- ✅ No concurrent write conflicts (optimistic locking with retry)
-- ✅ Log is always updated first (data never lost)
-- ✅ Log is immutable and append-only
-- ✅ Hash chain integrity (tampering breaks subsequent hashes)
-- ✅ Global ordering (log versions provide chronological order)
-- ✅ Eventual consistency (orphans repaired automatically)
-- ✅ Bounded repair time (within `repair_check_interval_ms` of activity)
+- No concurrent write conflicts (optimistic locking with retry)
+- Log is always updated first (data never lost)
+- Log is immutable and append-only
+- Hash chain integrity (tampering breaks subsequent hashes)
+- Global ordering (log versions provide chronological order)
+- Eventual consistency (orphans repaired automatically)
+- Bounded repair time (within `repair_check_interval_ms` of activity)
 
 ### What This System Does NOT Guarantee
 
-- ❌ Immediate consistency (key object write can fail temporarily)
-- ❌ Transactional semantics (not ACID - log + key are separate writes)
-- ❌ Latest entry always consistent (most recent may be orphaned briefly)
+- Immediate consistency (key object write can fail temporarily)
+- Transactional semantics (not ACID - log + key are separate writes)
+- Latest entry always consistent (most recent may be orphaned briefly)
 
 ## Use Cases
 
@@ -291,10 +358,10 @@ Based on 1M write operations:
 
 | Component | Cost |
 |-----------|------|
-| S3 PUT requests (log) | 1M × $0.005/1K = $5.00 |
-| S3 PUT requests (keys) | 1M × $0.005/1K = $5.00 |
-| S3 GET requests | 1M × $0.0004/1K = $0.40 |
-| S3 storage (1KB/entry) | 1GB × $0.023 = $0.023 |
+| S3 PUT requests (log) | 1M x $0.005/1K = $5.00 |
+| S3 PUT requests (keys) | 1M x $0.005/1K = $5.00 |
+| S3 GET requests | 1M x $0.0004/1K = $0.40 |
+| S3 storage (1KB/entry) | 1GB x $0.023 = $0.023 |
 | **Total** | **~$10.42** |
 
 DynamoDB equivalent: ~$1.25/M writes + ~$5/M reads = **$6.25+** (plus storage)
@@ -319,7 +386,7 @@ immukv/
 │   │   ├── _internal/           # Internal implementation details
 │   │   │   ├── __init__.py
 │   │   │   ├── json_helpers.py  # Internal JSON utilities
-│   │   │   ├── s3_client.py     # S3 client implementation
+│   │   │   ├── s3_client.py     # S3 client (aiobotocore with sync bridge)
 │   │   │   ├── s3_helpers.py    # S3 helper functions
 │   │   │   ├── s3_types.py      # S3-related type definitions
 │   │   │   └── types.py         # Internal type definitions
