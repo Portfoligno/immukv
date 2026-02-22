@@ -1360,7 +1360,7 @@ describe("ImmuKV", () => {
       template.resourceCountIs("AWS::IAM::Role", 0);
     });
 
-    test("per-prefix OIDC: each prefix gets its own federated role", () => {
+    test("per-prefix OIDC: each prefix gets its own federated role with shared provider", () => {
       new ImmuKV(stack, "ImmuKV", {
         prefixes: [
           {
@@ -1368,7 +1368,7 @@ describe("ImmuKV", () => {
             oidcProviders: [
               {
                 issuerUrl: "https://accounts.google.com",
-                clientIds: ["pipeline-client"],
+                clientIds: ["shared-client"],
               },
             ],
           },
@@ -1377,13 +1377,16 @@ describe("ImmuKV", () => {
             oidcProviders: [
               {
                 issuerUrl: "https://accounts.google.com",
-                clientIds: ["config-client"],
+                clientIds: ["shared-client"],
               },
             ],
           },
         ],
       });
       const template = Template.fromStack(stack);
+
+      // Only one OIDC provider (shared across prefixes with same issuerUrl)
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 1);
 
       // Two federated roles (one per prefix)
       const roles = template.findResources("AWS::IAM::Role");
@@ -1394,6 +1397,136 @@ describe("ImmuKV", () => {
         ),
       );
       expect(federatedRoles.length).toBe(2);
+    });
+
+    test("two prefixes, same OIDC provider, different oidcReadOnly: one gets readWrite, other gets readOnly", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "pipeline/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["shared-client"],
+              },
+            ],
+            oidcReadOnly: false,
+          },
+          {
+            s3Prefix: "config/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["shared-client"],
+              },
+            ],
+            oidcReadOnly: true,
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Only one OIDC provider
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 1);
+
+      // Two federated roles
+      const roles = template.findResources("AWS::IAM::Role");
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const federatedRoles = Object.entries(roles).filter(([, r]) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoles.length).toBe(2);
+
+      // Collect the policy actions attached to each federated role
+      const policyActions = federatedRoles.map(([, role]) => {
+        const policyArns = role.Properties.ManagedPolicyArns as Array<{
+          Ref: string;
+        }>;
+        const policy = policies[policyArns[0]!.Ref];
+        return policy!.Properties.PolicyDocument.Statement[0]
+          .Action as string[];
+      });
+
+      // One role should have PutObject (read-write), the other should not (read-only)
+      const hasReadWrite = policyActions.some((actions) =>
+        actions.includes("s3:PutObject"),
+      );
+      const hasReadOnly = policyActions.some(
+        (actions) => !actions.includes("s3:PutObject"),
+      );
+      expect(hasReadWrite).toBe(true);
+      expect(hasReadOnly).toBe(true);
+    });
+
+    test("two prefixes with different OIDC providers: creates 2 provider resources, 2 roles", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "pipeline/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["google-client"],
+              },
+            ],
+          },
+          {
+            s3Prefix: "config/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://login.microsoftonline.com/tenant-id/v2.0",
+                clientIds: ["azure-client"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Two distinct OIDC providers
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 2);
+
+      // Two federated roles
+      const roles = template.findResources("AWS::IAM::Role");
+      const federatedRoles = Object.values(roles).filter((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoles.length).toBe(2);
+    });
+
+    test("throws when same issuerUrl has different clientIds across prefixes", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [
+            {
+              s3Prefix: "pipeline/",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: ["client-a"],
+                },
+              ],
+            },
+            {
+              s3Prefix: "config/",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: ["client-b"],
+                },
+              ],
+            },
+          ],
+        });
+      }).toThrow(
+        'OIDC provider conflict: issuerUrl "https://accounts.google.com" is referenced by multiple prefixes with different clientIds',
+      );
     });
   });
 

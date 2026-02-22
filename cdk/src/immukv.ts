@@ -336,6 +336,31 @@ export class ImmuKV extends Construct {
       }
     }
 
+    // OIDC cross-prefix conflict check: same issuerUrl must have same clientIds
+    const oidcClientIdsByIssuer = new Map<string, string[]>();
+    for (const pc of props.prefixes) {
+      if (pc.oidcProviders === undefined) continue;
+      for (const provider of pc.oidcProviders) {
+        const existing = oidcClientIdsByIssuer.get(provider.issuerUrl);
+        if (existing !== undefined) {
+          const sortedExisting = [...existing].sort();
+          const sortedNew = [...provider.clientIds].sort();
+          if (
+            sortedExisting.length !== sortedNew.length ||
+            sortedExisting.some((v, i) => v !== sortedNew[i])
+          ) {
+            throw new Error(
+              `OIDC provider conflict: issuerUrl "${provider.issuerUrl}" is referenced by multiple prefixes ` +
+                `with different clientIds. AWS IAM allows only one OIDC provider per issuer URL. ` +
+                `Conflicting clientIds: [${existing.join(", ")}] vs [${provider.clientIds.join(", ")}]`,
+            );
+          }
+        } else {
+          oidcClientIdsByIssuer.set(provider.issuerUrl, provider.clientIds);
+        }
+      }
+    }
+
     // ── Lifecycle Rules (aggregated before bucket creation) ──
 
     const lifecycleRules: s3.LifecycleRule[] = [];
@@ -383,6 +408,32 @@ export class ImmuKV extends Construct {
       lifecycleRules: lifecycleRules.length > 0 ? lifecycleRules : undefined,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
+
+    // ── OIDC Provider Deduplication ──
+    // AWS IAM OIDC providers are account-level singletons keyed by issuer URL.
+    // Create each provider once, then share across prefixes.
+
+    const oidcProviderMap = new Map<string, iam.OpenIdConnectProvider>();
+    let oidcProviderIndex = 0;
+    for (const pc of props.prefixes) {
+      if (pc.oidcProviders === undefined) continue;
+      for (const provider of pc.oidcProviders) {
+        if (!oidcProviderMap.has(provider.issuerUrl)) {
+          oidcProviderMap.set(
+            provider.issuerUrl,
+            new iam.OpenIdConnectProvider(
+              this,
+              `OidcProvider-${oidcProviderIndex}`,
+              {
+                url: provider.issuerUrl,
+                clientIds: provider.clientIds,
+              },
+            ),
+          );
+          oidcProviderIndex++;
+        }
+      }
+    }
 
     // ── Per-Prefix Resource Loop ──
 
@@ -455,21 +506,17 @@ export class ImmuKV extends Construct {
         );
       }
 
-      // OIDC federation
+      // OIDC federation (providers are shared; roles are per-prefix)
       let federatedRole: iam.Role | undefined;
 
       if (pc.oidcProviders !== undefined && pc.oidcProviders.length > 0) {
-        const oidcProviders = pc.oidcProviders.map(
-          (provider, i) =>
-            new iam.OpenIdConnectProvider(this, `OidcProvider-${tag}-${i}`, {
-              url: provider.issuerUrl,
-              clientIds: provider.clientIds,
-            }),
+        const resolvedProviders = pc.oidcProviders.map(
+          (p) => oidcProviderMap.get(p.issuerUrl)!,
         );
 
         federatedRole = new iam.Role(this, `FederatedRole-${tag}`, {
           assumedBy: new iam.CompositePrincipal(
-            ...oidcProviders.map(
+            ...resolvedProviders.map(
               (provider, i) =>
                 new iam.WebIdentityPrincipal(
                   provider.openIdConnectProviderArn,
