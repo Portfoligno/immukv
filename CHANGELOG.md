@@ -5,6 +5,14 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.24] - 2026-02-22
+
+### Fixed
+
+- CDK: Deduplicate OIDC providers across prefixes (same issuer URL creates one provider resource)
+- CDK: Normalize OIDC issuer URLs before deduplication (trailing slash, hostname casing, default port)
+- CDK: Throw on conflicting `clientIds` for the same issuer URL across prefixes
+
 ## [0.1.23] - 2026-02-22
 
 ### Changed
@@ -315,6 +323,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.24]: https://github.com/Portfoligno/immukv/releases/tag/0.1.24
 [0.1.23]: https://github.com/Portfoligno/immukv/releases/tag/0.1.23
 [0.1.22]: https://github.com/Portfoligno/immukv/releases/tag/0.1.22
 [0.1.21]: https://github.com/Portfoligno/immukv/releases/tag/0.1.21
