@@ -1594,6 +1594,140 @@ describe("ImmuKV", () => {
         });
       }).toThrow("OIDC provider conflict");
     });
+
+    test("trust policy includes :email condition when allowedEmails is provided", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+                allowedEmails: ["alice@example.com"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::IAM::Role", {
+        AssumeRolePolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: "sts:AssumeRoleWithWebIdentity",
+              Condition: {
+                StringEquals: {
+                  "accounts.google.com:aud": ["my-client-id"],
+                  "accounts.google.com:email": ["alice@example.com"],
+                },
+              },
+              Effect: "Allow",
+            }),
+          ]),
+        },
+      });
+    });
+
+    test("trust policy omits :email condition when allowedEmails is omitted", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // The trust policy should have :aud but NOT :email
+      const roles = template.findResources("AWS::IAM::Role");
+      const federatedRoleEntry = Object.values(roles).find((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoleEntry).toBeDefined();
+      const statement =
+        federatedRoleEntry!.Properties.AssumeRolePolicyDocument.Statement.find(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        );
+      const stringEquals = (
+        statement.Condition as { StringEquals: Record<string, unknown> }
+      ).StringEquals;
+      expect(stringEquals).toHaveProperty(["accounts.google.com:aud"]);
+      expect(stringEquals).not.toHaveProperty(["accounts.google.com:email"]);
+    });
+
+    test("empty allowedEmails array throws", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [
+            {
+              s3Prefix: "",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: ["my-client-id"],
+                  allowedEmails: [],
+                },
+              ],
+            },
+          ],
+        });
+      }).toThrow("allowedEmails must be non-empty when provided");
+    });
+
+    test("multiple allowedEmails produce correct StringEquals condition", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+                allowedEmails: [
+                  "alice@example.com",
+                  "bob@example.com",
+                  "carol@example.com",
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      template.hasResourceProperties("AWS::IAM::Role", {
+        AssumeRolePolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: "sts:AssumeRoleWithWebIdentity",
+              Condition: {
+                StringEquals: {
+                  "accounts.google.com:aud": ["my-client-id"],
+                  "accounts.google.com:email": [
+                    "alice@example.com",
+                    "bob@example.com",
+                    "carol@example.com",
+                  ],
+                },
+              },
+              Effect: "Allow",
+            }),
+          ]),
+        },
+      });
+    });
   });
 
   describe("Multi-Prefix Integration", () => {

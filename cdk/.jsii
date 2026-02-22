@@ -4159,7 +4159,7 @@
         },
         "locationInModule": {
           "filename": "src/immukv.ts",
-          "line": 267
+          "line": 277
         },
         "parameters": [
           {
@@ -4185,7 +4185,7 @@
       "kind": "class",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 235
+        "line": 245
       },
       "methods": [
         {
@@ -4199,7 +4199,7 @@
           },
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 253
+            "line": 263
           },
           "name": "prefix",
           "parameters": [
@@ -4227,7 +4227,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 237
+            "line": 247
           },
           "name": "bucket",
           "type": {
@@ -4243,7 +4243,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 243
+            "line": 253
           },
           "name": "prefixes",
           "type": {
@@ -4270,7 +4270,7 @@
       "kind": "interface",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 27
+        "line": 37
       },
       "name": "ImmuKVPrefixConfig",
       "properties": [
@@ -4284,7 +4284,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 42
+            "line": 52
           },
           "name": "s3Prefix",
           "type": {
@@ -4302,7 +4302,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 63
+            "line": 73
           },
           "name": "keyVersionRetention",
           "optional": true,
@@ -4321,7 +4321,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 70
+            "line": 80
           },
           "name": "keyVersionsToRetain",
           "optional": true,
@@ -4340,7 +4340,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 49
+            "line": 59
           },
           "name": "logVersionRetention",
           "optional": true,
@@ -4359,7 +4359,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 56
+            "line": 66
           },
           "name": "logVersionsToRetain",
           "optional": true,
@@ -4378,7 +4378,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 90
+            "line": 100
           },
           "name": "oidcProviders",
           "optional": true,
@@ -4402,7 +4402,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 97
+            "line": 107
           },
           "name": "oidcReadOnly",
           "optional": true,
@@ -4421,7 +4421,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 79
+            "line": 89
           },
           "name": "onLogEntryCreated",
           "optional": true,
@@ -4443,7 +4443,7 @@
       "kind": "interface",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 103
+        "line": 113
       },
       "name": "ImmuKVPrefixResources",
       "properties": [
@@ -4457,7 +4457,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 120
+            "line": 130
           },
           "name": "readOnlyPolicy",
           "type": {
@@ -4474,7 +4474,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 114
+            "line": 124
           },
           "name": "readWritePolicy",
           "type": {
@@ -4490,7 +4490,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 105
+            "line": 115
           },
           "name": "s3Prefix",
           "type": {
@@ -4507,7 +4507,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 126
+            "line": 136
           },
           "name": "federatedRole",
           "optional": true,
@@ -4528,7 +4528,7 @@
       "kind": "interface",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 129
+        "line": 139
       },
       "name": "ImmuKVProps",
       "properties": [
@@ -4543,7 +4543,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 168
+            "line": 178
           },
           "name": "prefixes",
           "type": {
@@ -4565,7 +4565,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 134
+            "line": 144
           },
           "name": "bucketName",
           "optional": true,
@@ -4583,7 +4583,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 140
+            "line": 150
           },
           "name": "useKmsEncryption",
           "optional": true,
@@ -4644,11 +4644,34 @@
           "type": {
             "primitive": "string"
           }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "remarks": "When provided, the trust policy adds a `StringEquals` condition on\n`${issuerUrl}:email` listing these addresses, restricting federation\nto the specified identities. Must be non-empty when provided.\n\nWhen omitted, the trust policy only checks `:aud` (client ID).",
+            "stability": "experimental",
+            "summary": "Email addresses allowed to assume the federated role."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 26
+          },
+          "name": "allowedEmails",
+          "optional": true,
+          "type": {
+            "collection": {
+              "elementtype": {
+                "primitive": "string"
+              },
+              "kind": "array"
+            }
+          }
         }
       ],
       "symbolId": "src/immukv:OidcProvider"
     }
   },
-  "version": "0.1.24-dev.0",
-  "fingerprint": "SkrFvUGLgOIJDhOiLkqfLxC8n6VrvlqZw8qbnMyyzpk="
+  "version": "0.1.25-dev.0",
+  "fingerprint": "TwY//kRFIIP7yFHOTKI07uX/75Eqyzh2wcS8X/bzpso="
 }

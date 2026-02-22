@@ -14,6 +14,16 @@ export interface OidcProvider {
   readonly issuerUrl: string;
   /** Client IDs (audiences) to trust from this provider */
   readonly clientIds: string[];
+  /**
+   * Email addresses allowed to assume the federated role.
+   *
+   * When provided, the trust policy adds a `StringEquals` condition on
+   * `${issuerUrl}:email` listing these addresses, restricting federation
+   * to the specified identities. Must be non-empty when provided.
+   *
+   * When omitted, the trust policy only checks `:aud` (client ID).
+   */
+  readonly allowedEmails?: string[];
 }
 
 /**
@@ -376,6 +386,14 @@ export class ImmuKV extends Construct {
               `s3Prefix "${pfx}": oidcProviders[${i}].clientIds must contain at least one element`,
             );
           }
+          if (
+            provider.allowedEmails !== undefined &&
+            provider.allowedEmails.length === 0
+          ) {
+            throw new Error(
+              `s3Prefix "${pfx}": oidcProviders[${i}].allowedEmails must be non-empty when provided`,
+            );
+          }
         }
       }
     }
@@ -564,18 +582,20 @@ export class ImmuKV extends Construct {
 
         federatedRole = new iam.Role(this, `FederatedRole-${tag}`, {
           assumedBy: new iam.CompositePrincipal(
-            ...resolvedProviders.map(
-              (provider, i) =>
-                new iam.WebIdentityPrincipal(
-                  provider.openIdConnectProviderArn,
-                  {
-                    StringEquals: {
-                      [`${stripProtocol(pc.oidcProviders![i]!.issuerUrl)}:aud`]:
-                        pc.oidcProviders![i]!.clientIds,
-                    },
-                  },
-                ),
-            ),
+            ...resolvedProviders.map((provider, i) => {
+              const oidc = pc.oidcProviders![i]!;
+              const issuerHost = stripProtocol(oidc.issuerUrl);
+              const conditions: Record<string, string[]> = {
+                [`${issuerHost}:aud`]: oidc.clientIds,
+              };
+              if (oidc.allowedEmails !== undefined) {
+                conditions[`${issuerHost}:email`] = oidc.allowedEmails;
+              }
+              return new iam.WebIdentityPrincipal(
+                provider.openIdConnectProviderArn,
+                { StringEquals: conditions },
+              );
+            }),
           ),
           maxSessionDuration: cdk.Duration.hours(1),
         });
