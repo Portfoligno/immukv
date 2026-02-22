@@ -183,15 +183,45 @@ function normalizeIssuerUrl(issuerUrl: string): string {
 }
 
 /**
+ * Strips the leading "https://" or "http://" protocol from a URL string.
+ */
+function stripProtocol(url: string): string {
+  if (url.startsWith("https://")) return url.slice(8);
+  if (url.startsWith("http://")) return url.slice(7);
+  return url;
+}
+
+/**
  * Converts an S3 prefix string to a CDK construct-safe ID suffix.
  */
 function prefixToConstructId(s3Prefix: string): string {
   if (s3Prefix === "") return "Root";
-  return s3Prefix
-    .replace(/\/+$/, "")
-    .replace(/[^a-zA-Z0-9]/g, " ")
+
+  // Strip trailing slashes (was: .replace(/\/+$/, ""))
+  let stripped = s3Prefix;
+  while (stripped.endsWith("/")) {
+    stripped = stripped.slice(0, -1);
+  }
+
+  // Replace non-alphanumeric characters with spaces (was: .replace(/[^a-zA-Z0-9]/g, " "))
+  let spaced = "";
+  for (const ch of stripped) {
+    if (
+      (ch >= "a" && ch <= "z") ||
+      (ch >= "A" && ch <= "Z") ||
+      (ch >= "0" && ch <= "9")
+    ) {
+      spaced += ch;
+    } else {
+      spaced += " ";
+    }
+  }
+
+  // Split on whitespace runs and PascalCase-join (was: .split(/\s+/))
+  return spaced
     .trim()
-    .split(/\s+/)
+    .split(" ")
+    .filter((w) => w !== "")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join("");
 }
@@ -540,7 +570,7 @@ export class ImmuKV extends Construct {
                   provider.openIdConnectProviderArn,
                   {
                     StringEquals: {
-                      [`${pc.oidcProviders![i]!.issuerUrl.replace(/^https?:\/\//, "")}:aud`]:
+                      [`${stripProtocol(pc.oidcProviders![i]!.issuerUrl)}:aud`]:
                         pc.oidcProviders![i]!.clientIds,
                     },
                   },
