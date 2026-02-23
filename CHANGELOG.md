@@ -5,6 +5,21 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- CDK: Wildcard prefix support via `wildcardPrefixes` on `ImmuKVProps`
+  - New `ImmuKVWildcardPrefixConfig` interface with `pattern`, `oidcProviders`, `oidcReadOnly`
+  - Supports `*` and `?` wildcards for IAM-only scoping (e.g., `tenant-*/logs/`)
+  - Uses `StringLike` conditions in IAM policies
+  - No lifecycle rules or notifications (IAM only)
+  - Accessible via `wildcardPrefix(pattern)` method returning `ImmuKVWildcardPrefixResources`
+
+### Changed
+
+- CDK: Internal — replaced regular expressions with plain string functions
+
 ## [0.1.25] - 2026-02-23
 
 ### Added

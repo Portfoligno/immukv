@@ -204,7 +204,83 @@ const store = new ImmuKV(stack, "ImmuKV", {
 store.prefix("app/").federatedRole; // IAM role for OIDC users
 ```
 
+#### Email-Based Access Control
+
+Use `allowedEmails` on an `OidcProvider` to restrict federation to specific email addresses. This adds a `StringEquals` condition on `${issuerUrl}:email` to the trust policy.
+
+```typescript
+const store = new ImmuKV(stack, "ImmuKV", {
+  prefixes: [
+    {
+      s3Prefix: "app/",
+      oidcProviders: [
+        {
+          issuerUrl: "https://accounts.google.com",
+          clientIds: ["your-client-id.apps.googleusercontent.com"],
+          allowedEmails: ["alice@example.com", "bob@example.com"],
+        },
+      ],
+    },
+  ],
+});
+```
+
+When `allowedEmails` is omitted, the trust policy only checks `:aud` (client ID). When provided, it must be non-empty.
+
+#### Provider Deduplication
+
+OIDC providers are deduplicated by issuer URL. If the same issuer URL appears across multiple prefixes (literal or wildcard), a single IAM OIDC provider resource is created and shared. Issuer URLs are normalized (`new URL(issuerUrl).href`) so that cosmetic variants like trailing slashes, mixed-case hostnames, and default ports are treated as the same provider.
+
+If the same issuer URL is referenced with different `clientIds` across prefixes, the construct throws an error at synthesis time.
+
+### Wildcard Prefixes
+
+Wildcard prefixes provide IAM-only scoping using patterns like `tenant-*/logs/*`. They support `*` (zero or more characters) and `?` (exactly one character) via IAM `StringLike` conditions and ARN matching.
+
+Wildcard prefixes do **not** support S3 lifecycle rules, event notifications, or listing -- those require literal prefixes. They are purely for IAM policy scoping.
+
+```typescript
+import { ImmuKV } from "cdk-immukv";
+
+const store = new ImmuKV(stack, "ImmuKV", {
+  prefixes: [{ s3Prefix: "" }],
+  wildcardPrefixes: [
+    {
+      pattern: "tenant-*/logs/",
+      oidcProviders: [
+        {
+          issuerUrl: "https://accounts.google.com",
+          clientIds: ["your-client-id.apps.googleusercontent.com"],
+        },
+      ],
+    },
+    {
+      pattern: "*/config/",
+      oidcReadOnly: true,
+      oidcProviders: [
+        {
+          issuerUrl: "https://accounts.google.com",
+          clientIds: ["your-client-id.apps.googleusercontent.com"],
+        },
+      ],
+    },
+  ],
+});
+
+// Access wildcard prefix resources
+store.wildcardPrefix("tenant-*/logs/").readWritePolicy;
+store.wildcardPrefix("tenant-*/logs/").federatedRole;
+```
+
 ## API
+
+### `OidcProvider`
+
+Configuration for an OIDC identity provider:
+
+- `issuerUrl` (required): OIDC issuer URL (must start with `"https://"`).
+- `clientIds` (required): Client IDs (audiences) to trust from this provider. Must contain at least one element.
+- `allowedEmails` (optional): Email addresses allowed to assume the federated role. Adds a `StringEquals` condition on `${issuerUrl}:email` to the trust policy. Must be non-empty when provided. When omitted, the trust policy only checks `:aud` (client ID).
 
 ### `ImmuKVProps`
 
@@ -213,6 +289,7 @@ Top-level properties for the `ImmuKV` construct:
 - `bucketName` (optional): Name for the S3 bucket. If not specified, an auto-generated bucket name will be used.
 - `useKmsEncryption` (optional): Enable KMS encryption instead of S3-managed encryption (default: false).
 - `prefixes` (required): Array of `ImmuKVPrefixConfig` entries. At least one entry is required.
+- `wildcardPrefixes` (optional): Array of `ImmuKVWildcardPrefixConfig` entries for IAM-only wildcard scoping.
 
 ### `ImmuKVPrefixConfig`
 
@@ -224,7 +301,7 @@ Configuration for a single ImmuKV prefix within the bucket:
 - `keyVersionRetention` (optional): Duration to retain old key object versions. Must be expressible in whole days.
 - `keyVersionsToRetain` (optional): Number of old key versions to retain per key.
 - `onLogEntryCreated` (optional): S3 notification destination triggered when log entries are created under this prefix. Supports Lambda, SNS, and SQS.
-- `oidcProviders` (optional): Array of OIDC identity providers for web identity federation scoped to this prefix. Each provider has an `issuerUrl` (must start with `"https://"`) and `clientIds` (audiences to trust).
+- `oidcProviders` (optional): Array of `OidcProvider` entries for web identity federation scoped to this prefix.
 - `oidcReadOnly` (optional): Whether the federated role gets read-only access instead of read-write (default: false).
 
 ### Prefix Validation Rules
@@ -234,13 +311,23 @@ Configuration for a single ImmuKV prefix within the bucket:
 - Overlapping prefixes are not allowed (one being a prefix of the other)
 - Empty string prefix `""` cannot coexist with other prefixes (it matches all objects)
 
+### `ImmuKVWildcardPrefixConfig`
+
+Configuration for a wildcard-based IAM prefix pattern:
+
+- `pattern` (required): Wildcard prefix pattern for IAM scoping. Supports `*` (zero or more characters) and `?` (exactly one character). Must not be empty, start with `/`, or contain `..`.
+- `oidcProviders` (optional): Array of `OidcProvider` entries for web identity federation scoped to this wildcard pattern.
+- `oidcReadOnly` (optional): Whether the federated role gets read-only access instead of read-write (default: false).
+
 ### `ImmuKV` Class
 
 The `ImmuKV` construct exposes:
 
 - `bucket`: The S3 bucket shared by all prefixes.
 - `prefixes`: Object mapping prefix strings to `ImmuKVPrefixResources`.
+- `wildcardPrefixes`: Object mapping wildcard pattern strings to `ImmuKVWildcardPrefixResources`.
 - `prefix(s3Prefix)`: Method to get resources for a specific prefix (throws if not found).
+- `wildcardPrefix(pattern)`: Method to get resources for a specific wildcard prefix pattern (throws if not found).
 
 ### `ImmuKVPrefixResources`
 
@@ -250,6 +337,15 @@ Resources created for each prefix:
 - `readWritePolicy`: IAM managed policy granting read-write access scoped to this prefix.
 - `readOnlyPolicy`: IAM managed policy granting read-only access scoped to this prefix.
 - `federatedRole` (optional): Federated IAM role for OIDC users scoped to this prefix. Only present when `oidcProviders` was specified.
+
+### `ImmuKVWildcardPrefixResources`
+
+Resources created for each wildcard prefix pattern:
+
+- `pattern`: The wildcard pattern string (as provided in the config).
+- `readWritePolicy`: IAM managed policy granting read-write access scoped to this wildcard pattern. Uses `StringLike` conditions on `s3:prefix`.
+- `readOnlyPolicy`: IAM managed policy granting read-only access scoped to this wildcard pattern.
+- `federatedRole` (optional): Federated IAM role for OIDC users scoped to this wildcard pattern. Only present when `oidcProviders` was specified.
 
 ## License
 
