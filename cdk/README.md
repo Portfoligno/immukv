@@ -201,7 +201,7 @@ const store = new ImmuKV(stack, "ImmuKV", {
 });
 
 // The federated role is available on the prefix resources
-store.prefix("app/").federatedRole;  // IAM role for OIDC users
+store.prefix("app/").federatedRole; // IAM role for OIDC users
 ```
 
 ## API

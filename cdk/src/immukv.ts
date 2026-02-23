@@ -108,6 +108,51 @@ export interface ImmuKVPrefixConfig {
 }
 
 /**
+ * Configuration for a wildcard-based IAM prefix pattern.
+ *
+ * Wildcards (`*`, `?`) are supported in IAM policies via `StringLike` conditions
+ * and IAM ARN matching, but do NOT work for S3 lifecycle rules, notifications,
+ * or listing. This interface therefore only exposes IAM-related options.
+ *
+ * @example
+ *
+ * // Scope IAM to any tenant's logs:
+ * { pattern: 'tenant-*\/logs/', oidcProviders: [...] }
+ */
+export interface ImmuKVWildcardPrefixConfig {
+  /**
+   * Wildcard prefix pattern for IAM scoping.
+   *
+   * Supports `*` (matches zero or more characters) and `?` (matches exactly one character).
+   * Used in IAM policy resource ARNs and `StringLike` conditions on `s3:prefix`.
+   *
+   * Validation:
+   * - Must not be empty
+   * - Must not start with `/` or contain `..`
+   * - Must not duplicate another wildcard pattern in the same instance
+   */
+  readonly pattern: string;
+
+  /**
+   * OIDC identity providers for web identity federation scoped to this wildcard pattern.
+   *
+   * Creates a federated IAM role whose policies are scoped to this pattern only.
+   * The role receives this pattern's readWritePolicy by default,
+   * or readOnlyPolicy if `oidcReadOnly` is true.
+   *
+   * @default undefined — no OIDC federation
+   */
+  readonly oidcProviders?: OidcProvider[];
+
+  /**
+   * Whether the federated role gets read-only access instead of read-write.
+   * Only meaningful when `oidcProviders` is set.
+   * @default false
+   */
+  readonly oidcReadOnly?: boolean;
+}
+
+/**
  * Resources created for a single ImmuKV prefix.
  */
 export interface ImmuKVPrefixResources {
@@ -131,6 +176,35 @@ export interface ImmuKVPrefixResources {
 
   /**
    * Federated IAM role for OIDC users scoped to this prefix.
+   * Only present when `oidcProviders` was specified.
+   */
+  readonly federatedRole?: iam.Role;
+}
+
+/**
+ * Resources created for a single wildcard prefix pattern.
+ */
+export interface ImmuKVWildcardPrefixResources {
+  /** The wildcard pattern string (as provided in the config) */
+  readonly pattern: string;
+
+  /**
+   * IAM managed policy granting read-write access scoped to this wildcard pattern.
+   *
+   * Object actions (GetObject, GetObjectVersion, PutObject, HeadObject)
+   * on `bucketArn/${pattern}*`. Bucket actions (ListBucket, ListBucketVersions)
+   * on `bucketArn` with `StringLike` condition on `s3:prefix`.
+   */
+  readonly readWritePolicy: iam.ManagedPolicy;
+
+  /**
+   * IAM managed policy granting read-only access scoped to this wildcard pattern.
+   * Same as readWritePolicy but without PutObject.
+   */
+  readonly readOnlyPolicy: iam.ManagedPolicy;
+
+  /**
+   * Federated IAM role for OIDC users scoped to this wildcard pattern.
    * Only present when `oidcProviders` was specified.
    */
   readonly federatedRole?: iam.Role;
@@ -176,6 +250,27 @@ export interface ImmuKVProps {
    * });
    */
   readonly prefixes: ImmuKVPrefixConfig[];
+
+  /**
+   * Wildcard prefix configurations for IAM-only scoping.
+   *
+   * Each entry defines IAM policies using wildcard patterns (e.g., `tenant-*\/logs/`).
+   * Wildcards work in IAM via `StringLike` conditions and ARN matching but do NOT
+   * support S3 lifecycle rules, notifications, or listing.
+   *
+   * @default undefined — no wildcard prefixes
+   *
+   * @example
+   *
+   * new ImmuKV(this, 'Store', {
+   *   prefixes: [{ s3Prefix: '' }],
+   *   wildcardPrefixes: [
+   *     { pattern: 'tenant-*\/logs/' },
+   *     { pattern: '*\/config/', oidcReadOnly: true, oidcProviders: [...] },
+   *   ],
+   * });
+   */
+  readonly wildcardPrefixes?: ImmuKVWildcardPrefixConfig[];
 }
 
 /**
@@ -253,6 +348,14 @@ export class ImmuKV extends Construct {
   public readonly prefixes: { [key: string]: ImmuKVPrefixResources };
 
   /**
+   * Per-wildcard-pattern resources, keyed by the pattern string.
+   * Use `wildcardPrefix()` for type-safe access with runtime validation.
+   */
+  public readonly wildcardPrefixes: {
+    [key: string]: ImmuKVWildcardPrefixResources;
+  };
+
+  /**
    * Get resources for a specific prefix.
    * @throws Error if no prefix with that name exists.
    *
@@ -266,6 +369,27 @@ export class ImmuKV extends Construct {
       throw new Error(
         `No prefix "${s3Prefix}" configured. Available: ${Object.keys(
           this.prefixes,
+        )
+          .map((k) => `"${k}"`)
+          .join(", ")}`,
+      );
+    }
+    return resources;
+  }
+
+  /**
+   * Get resources for a specific wildcard prefix pattern.
+   * @throws Error if no wildcard prefix with that pattern exists.
+   *
+   * @example
+   * instance.wildcardPrefix("tenant-*\/logs/").readWritePolicy
+   */
+  public wildcardPrefix(pattern: string): ImmuKVWildcardPrefixResources {
+    const resources = this.wildcardPrefixes[pattern];
+    if (!resources) {
+      throw new Error(
+        `No wildcard prefix "${pattern}" configured. Available: ${Object.keys(
+          this.wildcardPrefixes,
         )
           .map((k) => `"${k}"`)
           .join(", ")}`,
@@ -398,13 +522,107 @@ export class ImmuKV extends Construct {
       }
     }
 
+    // ── Wildcard Prefix Validation ──
+
+    const wildcardConfigs = props.wildcardPrefixes ?? [];
+
+    {
+      // Duplicate check
+      const seenWildcard = new Set<string>();
+      for (const wc of wildcardConfigs) {
+        if (wc.pattern === "") {
+          throw new Error("Wildcard prefix pattern must not be empty");
+        }
+        if (wc.pattern.startsWith("/") || wc.pattern.includes("..")) {
+          throw new Error(
+            `Wildcard pattern "${wc.pattern}": must not start with "/" or contain ".."`,
+          );
+        }
+        if (seenWildcard.has(wc.pattern)) {
+          throw new Error(`Duplicate wildcard pattern: "${wc.pattern}"`);
+        }
+        seenWildcard.add(wc.pattern);
+      }
+
+      // Construct ID collision check (among wildcard prefixes)
+      const wildcardConstructIds = new Map<string, string>();
+      for (const wc of wildcardConfigs) {
+        const tag = prefixToConstructId(wc.pattern);
+        const existing = wildcardConstructIds.get(tag);
+        if (existing !== undefined) {
+          throw new Error(
+            `Wildcard patterns "${existing}" and "${wc.pattern}" produce the same construct ID "${tag}". ` +
+              "Use patterns that produce distinct construct IDs.",
+          );
+        }
+        wildcardConstructIds.set(tag, wc.pattern);
+      }
+
+      // Construct ID collision check (wildcard vs literal prefixes)
+      for (const wc of wildcardConfigs) {
+        const tag = prefixToConstructId(wc.pattern);
+        const literalCollision = constructIds.get(tag);
+        if (literalCollision !== undefined) {
+          throw new Error(
+            `Wildcard pattern "${wc.pattern}" and literal prefix "${literalCollision}" produce the same construct ID "${tag}". ` +
+              "Use names that produce distinct construct IDs.",
+          );
+        }
+      }
+
+      // Per-wildcard OIDC validation
+      for (const wc of wildcardConfigs) {
+        if (wc.oidcProviders !== undefined && wc.oidcProviders.length > 0) {
+          for (const [i, provider] of wc.oidcProviders.entries()) {
+            if (!provider.issuerUrl.startsWith("https://")) {
+              throw new Error(
+                `Wildcard pattern "${wc.pattern}": oidcProviders[${i}].issuerUrl must start with "https://", got: ${provider.issuerUrl}`,
+              );
+            }
+            if (provider.clientIds.length === 0) {
+              throw new Error(
+                `Wildcard pattern "${wc.pattern}": oidcProviders[${i}].clientIds must contain at least one element`,
+              );
+            }
+            if (
+              provider.allowedEmails !== undefined &&
+              provider.allowedEmails.length === 0
+            ) {
+              throw new Error(
+                `Wildcard pattern "${wc.pattern}": oidcProviders[${i}].allowedEmails must be non-empty when provided`,
+              );
+            }
+          }
+        }
+      }
+    }
+
     // OIDC cross-prefix conflict check: same issuerUrl must have same clientIds.
     // Normalize issuer URLs so that cosmetic variants (trailing slash,
     // mixed case, default port) are detected as the same provider.
+    // Includes both literal and wildcard prefix providers.
     const oidcClientIdsByIssuer = new Map<string, string[]>();
+
+    const allOidcSources: { label: string; providers: OidcProvider[] }[] = [];
     for (const pc of props.prefixes) {
-      if (pc.oidcProviders === undefined) continue;
-      for (const provider of pc.oidcProviders) {
+      if (pc.oidcProviders !== undefined) {
+        allOidcSources.push({
+          label: `prefix "${pc.s3Prefix}"`,
+          providers: pc.oidcProviders,
+        });
+      }
+    }
+    for (const wc of wildcardConfigs) {
+      if (wc.oidcProviders !== undefined) {
+        allOidcSources.push({
+          label: `wildcard pattern "${wc.pattern}"`,
+          providers: wc.oidcProviders,
+        });
+      }
+    }
+
+    for (const source of allOidcSources) {
+      for (const provider of source.providers) {
         const normalizedUrl = normalizeIssuerUrl(provider.issuerUrl);
         const existing = oidcClientIdsByIssuer.get(normalizedUrl);
         if (existing !== undefined) {
@@ -476,13 +694,12 @@ export class ImmuKV extends Construct {
 
     // ── OIDC Provider Deduplication ──
     // AWS IAM OIDC providers are account-level singletons keyed by issuer URL.
-    // Create each provider once, then share across prefixes.
+    // Create each provider once, then share across literal and wildcard prefixes.
 
     const oidcProviderMap = new Map<string, iam.OpenIdConnectProvider>();
     let oidcProviderIndex = 0;
-    for (const pc of props.prefixes) {
-      if (pc.oidcProviders === undefined) continue;
-      for (const provider of pc.oidcProviders) {
+    for (const source of allOidcSources) {
+      for (const provider of source.providers) {
         const normalizedUrl = normalizeIssuerUrl(provider.issuerUrl);
         if (!oidcProviderMap.has(normalizedUrl)) {
           oidcProviderMap.set(
@@ -614,5 +831,109 @@ export class ImmuKV extends Construct {
     }
 
     this.prefixes = resourceMap;
+
+    // ── Per-Wildcard-Prefix Resource Loop ──
+
+    const wildcardResourceMap: {
+      [key: string]: ImmuKVWildcardPrefixResources;
+    } = {};
+
+    for (const wc of wildcardConfigs) {
+      const pat = wc.pattern;
+      const tag = prefixToConstructId(pat);
+
+      // IAM: wildcard-scoped object ARN — wildcards are native to IAM ARN matching
+      const objectArn = `${this.bucket.bucketArn}/${pat}*`;
+
+      // StringLike condition for ListBucket — wildcards are native to StringLike
+      const listCondition = { StringLike: { "s3:prefix": `${pat}*` } };
+
+      const readWritePolicy = new iam.ManagedPolicy(
+        this,
+        `WcReadWritePolicy-${tag}`,
+        {
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:PutObject",
+                "s3:HeadObject",
+              ],
+              resources: [objectArn],
+            }),
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ["s3:ListBucket", "s3:ListBucketVersions"],
+              resources: [this.bucket.bucketArn],
+              conditions: listCondition,
+            }),
+          ],
+        },
+      );
+
+      const readOnlyPolicy = new iam.ManagedPolicy(
+        this,
+        `WcReadOnlyPolicy-${tag}`,
+        {
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ["s3:GetObject", "s3:GetObjectVersion", "s3:HeadObject"],
+              resources: [objectArn],
+            }),
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ["s3:ListBucket", "s3:ListBucketVersions"],
+              resources: [this.bucket.bucketArn],
+              conditions: listCondition,
+            }),
+          ],
+        },
+      );
+
+      // OIDC federation (providers are shared; roles are per-wildcard-prefix)
+      let federatedRole: iam.Role | undefined;
+
+      if (wc.oidcProviders !== undefined && wc.oidcProviders.length > 0) {
+        const resolvedProviders = wc.oidcProviders.map(
+          (p) => oidcProviderMap.get(normalizeIssuerUrl(p.issuerUrl))!,
+        );
+
+        federatedRole = new iam.Role(this, `WcFederatedRole-${tag}`, {
+          assumedBy: new iam.CompositePrincipal(
+            ...resolvedProviders.map((provider, i) => {
+              const oidc = wc.oidcProviders![i]!;
+              const issuerHost = stripProtocol(oidc.issuerUrl);
+              const conditions: Record<string, string[]> = {
+                [`${issuerHost}:aud`]: oidc.clientIds,
+              };
+              if (oidc.allowedEmails !== undefined) {
+                conditions[`${issuerHost}:email`] = oidc.allowedEmails;
+              }
+              return new iam.WebIdentityPrincipal(
+                provider.openIdConnectProviderArn,
+                { StringEquals: conditions },
+              );
+            }),
+          ),
+          maxSessionDuration: cdk.Duration.hours(1),
+        });
+
+        federatedRole.addManagedPolicy(
+          wc.oidcReadOnly === true ? readOnlyPolicy : readWritePolicy,
+        );
+      }
+
+      wildcardResourceMap[pat] = {
+        pattern: pat,
+        readWritePolicy,
+        readOnlyPolicy,
+        federatedRole,
+      };
+    }
+
+    this.wildcardPrefixes = wildcardResourceMap;
   }
 }

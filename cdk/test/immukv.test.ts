@@ -1772,4 +1772,447 @@ describe("ImmuKV", () => {
       expect(pipeline.readOnlyPolicy).not.toBe(config.readOnlyPolicy);
     });
   });
+
+  describe("Wildcard Prefix IAM Policies", () => {
+    test("wildcard prefix creates IAM policy with StringLike condition (not StringEquals)", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [{ pattern: "tenant-*/logs/" }],
+      });
+      const template = Template.fromStack(stack);
+
+      // Find policies with StringLike condition containing the wildcard pattern
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const wildcardPolicies = Object.values(policies).filter((p) =>
+        p.Properties.PolicyDocument.Statement.some(
+          (s: Record<string, unknown>) =>
+            (s.Condition as Record<string, Record<string, string>> | undefined)
+              ?.StringLike?.["s3:prefix"] === "tenant-*/logs/*",
+        ),
+      );
+      // 2 wildcard policies: readWrite + readOnly
+      expect(wildcardPolicies.length).toBe(2);
+
+      // Ensure none of these use StringEquals for the wildcard condition
+      for (const policy of wildcardPolicies) {
+        for (const stmt of policy.Properties.PolicyDocument.Statement) {
+          if (stmt.Condition !== undefined) {
+            expect(stmt.Condition).toHaveProperty("StringLike");
+            expect(stmt.Condition).not.toHaveProperty("StringEquals");
+          }
+        }
+      }
+    });
+
+    test("wildcard prefix resource ARN includes the pattern", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [{ pattern: "tenant-*/logs/" }],
+      });
+      const template = Template.fromStack(stack);
+
+      // The wildcard readWrite policy has a resource ARN with Fn::Join
+      // containing the bucket ARN + "/tenant-*/logs/*".
+      // CDK synthesizes Resource as a single Fn::Join object (not an array).
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const wildcardPolicies = Object.values(policies).filter((p) =>
+        p.Properties.PolicyDocument.Statement.some(
+          (s: Record<string, unknown>) =>
+            (s.Condition as Record<string, Record<string, string>> | undefined)
+              ?.StringLike?.["s3:prefix"] === "tenant-*/logs/*",
+        ),
+      );
+      expect(wildcardPolicies.length).toBe(2);
+
+      // Verify the object-level statement has the correct ARN pattern
+      for (const policy of wildcardPolicies) {
+        const objectStmt = policy.Properties.PolicyDocument.Statement.find(
+          (s: Record<string, unknown>) =>
+            Array.isArray(s.Action) &&
+            (s.Action as string[]).includes("s3:GetObject"),
+        );
+        expect(objectStmt).toBeDefined();
+        // Resource is { "Fn::Join": ["", [bucketArn, "/tenant-*/logs/*"]] }
+        const fnJoin = objectStmt.Resource["Fn::Join"];
+        expect(fnJoin).toBeDefined();
+        const joinedParts = (fnJoin[1] as string[]).filter(
+          (p: unknown) => typeof p === "string",
+        );
+        const joinedStr = joinedParts.join("");
+        expect(joinedStr).toContain("/tenant-*/logs/*");
+      }
+    });
+
+    test("wildcard prefix creates exactly two IAM policies (readWrite + readOnly)", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [{ pattern: "tenant-*/logs/" }],
+      });
+      const template = Template.fromStack(stack);
+
+      // 2 for the literal root prefix + 2 for the wildcard prefix = 4 total
+      template.resourceCountIs("AWS::IAM::ManagedPolicy", 4);
+    });
+
+    test("wildcard prefix readOnly policy does not include PutObject", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [{ pattern: "tenant-*/logs/" }],
+      });
+      const template = Template.fromStack(stack);
+
+      // Find wildcard policies with StringLike condition
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const wildcardPolicies = Object.values(policies).filter((p) =>
+        p.Properties.PolicyDocument.Statement.some(
+          (s: Record<string, unknown>) =>
+            (s.Condition as Record<string, Record<string, string>> | undefined)
+              ?.StringLike?.["s3:prefix"] === "tenant-*/logs/*",
+        ),
+      );
+
+      // One should have PutObject (readWrite), one should not (readOnly)
+      const firstStatementActions = wildcardPolicies.map(
+        (p) => p.Properties.PolicyDocument.Statement[0].Action as string[],
+      );
+      const hasReadWrite = firstStatementActions.some((a) =>
+        a.includes("s3:PutObject"),
+      );
+      const hasReadOnly = firstStatementActions.some(
+        (a) => !a.includes("s3:PutObject"),
+      );
+      expect(hasReadWrite).toBe(true);
+      expect(hasReadOnly).toBe(true);
+    });
+  });
+
+  describe("Wildcard Prefix OIDC Federation", () => {
+    test("wildcard prefix with OIDC gets a federated role", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [
+          {
+            pattern: "tenant-*/logs/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Should have OIDC provider and federated role
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 1);
+
+      const roles = template.findResources("AWS::IAM::Role");
+      const federatedRoles = Object.values(roles).filter((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoles.length).toBe(1);
+    });
+
+    test("wildcard prefix with oidcReadOnly gets readOnly policy", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [
+          {
+            pattern: "tenant-*/logs/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
+            oidcReadOnly: true,
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      const roles = template.findResources("AWS::IAM::Role");
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const federatedRoleEntry = Object.values(roles).find((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoleEntry).toBeDefined();
+
+      const roleManagedPolicyArns = federatedRoleEntry!.Properties
+        .ManagedPolicyArns as Array<{ Ref: string }>;
+      expect(roleManagedPolicyArns.length).toBe(1);
+      const attachedPolicy = policies[roleManagedPolicyArns[0]!.Ref];
+      const firstStatementActions =
+        attachedPolicy!.Properties.PolicyDocument.Statement[0].Action;
+      expect(firstStatementActions).not.toContain("s3:PutObject");
+      expect(firstStatementActions).toContain("s3:GetObject");
+    });
+
+    test("wildcard prefix with oidcReadOnly=false gets readWrite policy", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [
+          {
+            pattern: "tenant-*/logs/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["my-client-id"],
+              },
+            ],
+            oidcReadOnly: false,
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      const roles = template.findResources("AWS::IAM::Role");
+      const policies = template.findResources("AWS::IAM::ManagedPolicy");
+      const federatedRoleEntry = Object.values(roles).find((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoleEntry).toBeDefined();
+
+      const roleManagedPolicyArns = federatedRoleEntry!.Properties
+        .ManagedPolicyArns as Array<{ Ref: string }>;
+      const attachedPolicy = policies[roleManagedPolicyArns[0]!.Ref];
+      const firstStatementActions =
+        attachedPolicy!.Properties.PolicyDocument.Statement[0].Action;
+      expect(firstStatementActions).toContain("s3:PutObject");
+      expect(firstStatementActions).toContain("s3:GetObject");
+    });
+
+    test("wildcard prefix without OIDC has no federatedRole", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [{ pattern: "tenant-*/logs/" }],
+      });
+
+      expect(
+        immukv.wildcardPrefix("tenant-*/logs/").federatedRole,
+      ).toBeUndefined();
+    });
+
+    test("wildcard and literal prefix share OIDC provider when same issuerUrl", () => {
+      new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          {
+            s3Prefix: "config/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["shared-client"],
+              },
+            ],
+          },
+        ],
+        wildcardPrefixes: [
+          {
+            pattern: "tenant-*/logs/",
+            oidcProviders: [
+              {
+                issuerUrl: "https://accounts.google.com",
+                clientIds: ["shared-client"],
+              },
+            ],
+          },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // Only one OIDC provider (shared)
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 1);
+
+      // Two federated roles (one literal, one wildcard)
+      const roles = template.findResources("AWS::IAM::Role");
+      const federatedRoles = Object.values(roles).filter((r) =>
+        r.Properties.AssumeRolePolicyDocument?.Statement?.some(
+          (s: Record<string, unknown>) =>
+            s.Action === "sts:AssumeRoleWithWebIdentity",
+        ),
+      );
+      expect(federatedRoles.length).toBe(2);
+    });
+  });
+
+  describe("Wildcard Prefix Mixed with Literal Prefixes", () => {
+    test("mixed literal + wildcard prefixes work together", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [
+          { s3Prefix: "pipeline/", logVersionRetention: cdk.Duration.days(90) },
+          { s3Prefix: "config/" },
+        ],
+        wildcardPrefixes: [
+          { pattern: "tenant-*/logs/" },
+          { pattern: "*/settings/" },
+        ],
+      });
+      const template = Template.fromStack(stack);
+
+      // 1 bucket
+      template.resourceCountIs("AWS::S3::Bucket", 1);
+      // 4 literal policies + 4 wildcard policies = 8
+      template.resourceCountIs("AWS::IAM::ManagedPolicy", 8);
+
+      // Accessor methods work
+      expect(immukv.prefix("pipeline/").readWritePolicy).toBeDefined();
+      expect(immukv.prefix("config/").readWritePolicy).toBeDefined();
+      expect(
+        immukv.wildcardPrefix("tenant-*/logs/").readWritePolicy,
+      ).toBeDefined();
+      expect(
+        immukv.wildcardPrefix("*/settings/").readWritePolicy,
+      ).toBeDefined();
+    });
+
+    test("wildcardPrefix() throws for non-existent pattern", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [{ pattern: "tenant-*/logs/" }],
+      });
+
+      expect(() => immukv.wildcardPrefix("nonexistent-*")).toThrow(
+        'No wildcard prefix "nonexistent-*" configured. Available: "tenant-*/logs/"',
+      );
+    });
+
+    test("wildcardPrefixes property is empty object when none configured", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+      });
+
+      expect(Object.keys(immukv.wildcardPrefixes).length).toBe(0);
+    });
+
+    test("wildcardPrefixes property contains correct keys", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [
+          { pattern: "tenant-*/logs/" },
+          { pattern: "*/config/" },
+        ],
+      });
+
+      expect(Object.keys(immukv.wildcardPrefixes).length).toBe(2);
+      expect("tenant-*/logs/" in immukv.wildcardPrefixes).toBe(true);
+      expect("*/config/" in immukv.wildcardPrefixes).toBe(true);
+    });
+
+    test("wildcard prefix resources include pattern string", () => {
+      const immukv = new ImmuKV(stack, "ImmuKV", {
+        prefixes: [{ s3Prefix: "" }],
+        wildcardPrefixes: [{ pattern: "tenant-*/logs/" }],
+      });
+
+      expect(immukv.wildcardPrefix("tenant-*/logs/").pattern).toBe(
+        "tenant-*/logs/",
+      );
+    });
+  });
+
+  describe("Wildcard Prefix Validation", () => {
+    test("throws error for empty wildcard pattern", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "" }],
+          wildcardPrefixes: [{ pattern: "" }],
+        });
+      }).toThrow("Wildcard prefix pattern must not be empty");
+    });
+
+    test("throws error for duplicate wildcard patterns", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "" }],
+          wildcardPrefixes: [
+            { pattern: "tenant-*/logs/" },
+            { pattern: "tenant-*/logs/" },
+          ],
+        });
+      }).toThrow('Duplicate wildcard pattern: "tenant-*/logs/"');
+    });
+
+    test("throws error when wildcard pattern starts with /", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "" }],
+          wildcardPrefixes: [{ pattern: "/invalid-*" }],
+        });
+      }).toThrow(
+        'Wildcard pattern "/invalid-*": must not start with "/" or contain ".."',
+      );
+    });
+
+    test("throws error when wildcard pattern contains ..", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "" }],
+          wildcardPrefixes: [{ pattern: "tenant-*/../secret/" }],
+        });
+      }).toThrow(
+        'Wildcard pattern "tenant-*/../secret/": must not start with "/" or contain ".."',
+      );
+    });
+
+    test("throws error for wildcard construct ID collision with literal prefix", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "tenant/" }],
+          wildcardPrefixes: [{ pattern: "tenant/" }],
+        });
+      }).toThrow('produce the same construct ID "Tenant"');
+    });
+
+    test("throws error for OIDC conflict between wildcard and literal prefix", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [
+            {
+              s3Prefix: "config/",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: ["client-a"],
+                },
+              ],
+            },
+          ],
+          wildcardPrefixes: [
+            {
+              pattern: "tenant-*/logs/",
+              oidcProviders: [
+                {
+                  issuerUrl: "https://accounts.google.com",
+                  clientIds: ["client-b"],
+                },
+              ],
+            },
+          ],
+        });
+      }).toThrow("OIDC provider conflict");
+    });
+
+    test("accepts valid wildcard patterns", () => {
+      expect(() => {
+        new ImmuKV(stack, "ImmuKV", {
+          prefixes: [{ s3Prefix: "" }],
+          wildcardPrefixes: [
+            { pattern: "tenant-*/logs/" },
+            { pattern: "*/config/" },
+            { pattern: "a?b/data/" },
+          ],
+        });
+      }).not.toThrow();
+    });
+  });
 });

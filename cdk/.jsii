@@ -4159,7 +4159,7 @@
         },
         "locationInModule": {
           "filename": "src/immukv.ts",
-          "line": 277
+          "line": 401
         },
         "parameters": [
           {
@@ -4185,7 +4185,7 @@
       "kind": "class",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 245
+        "line": 340
       },
       "methods": [
         {
@@ -4199,7 +4199,7 @@
           },
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 263
+            "line": 366
           },
           "name": "prefix",
           "parameters": [
@@ -4215,6 +4215,34 @@
               "fqn": "cdk-immukv.ImmuKVPrefixResources"
             }
           }
+        },
+        {
+          "docs": {
+            "custom": {
+              "throws": "Error if no wildcard prefix with that pattern exists."
+            },
+            "example": "instance.wildcardPrefix(\"tenant-*\\/logs/\").readWritePolicy",
+            "stability": "experimental",
+            "summary": "Get resources for a specific wildcard prefix pattern."
+          },
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 387
+          },
+          "name": "wildcardPrefix",
+          "parameters": [
+            {
+              "name": "pattern",
+              "type": {
+                "primitive": "string"
+              }
+            }
+          ],
+          "returns": {
+            "type": {
+              "fqn": "cdk-immukv.ImmuKVWildcardPrefixResources"
+            }
+          }
         }
       ],
       "name": "ImmuKV",
@@ -4227,7 +4255,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 247
+            "line": 342
           },
           "name": "bucket",
           "type": {
@@ -4243,13 +4271,34 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 253
+            "line": 348
           },
           "name": "prefixes",
           "type": {
             "collection": {
               "elementtype": {
                 "fqn": "cdk-immukv.ImmuKVPrefixResources"
+              },
+              "kind": "map"
+            }
+          }
+        },
+        {
+          "docs": {
+            "remarks": "Use `wildcardPrefix()` for type-safe access with runtime validation.",
+            "stability": "experimental",
+            "summary": "Per-wildcard-pattern resources, keyed by the pattern string."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 354
+          },
+          "name": "wildcardPrefixes",
+          "type": {
+            "collection": {
+              "elementtype": {
+                "fqn": "cdk-immukv.ImmuKVWildcardPrefixResources"
               },
               "kind": "map"
             }
@@ -4443,7 +4492,7 @@
       "kind": "interface",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 113
+        "line": 158
       },
       "name": "ImmuKVPrefixResources",
       "properties": [
@@ -4457,7 +4506,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 130
+            "line": 175
           },
           "name": "readOnlyPolicy",
           "type": {
@@ -4474,7 +4523,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 124
+            "line": 169
           },
           "name": "readWritePolicy",
           "type": {
@@ -4490,7 +4539,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 115
+            "line": 160
           },
           "name": "s3Prefix",
           "type": {
@@ -4507,7 +4556,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 136
+            "line": 181
           },
           "name": "federatedRole",
           "optional": true,
@@ -4528,7 +4577,7 @@
       "kind": "interface",
       "locationInModule": {
         "filename": "src/immukv.ts",
-        "line": 139
+        "line": 213
       },
       "name": "ImmuKVProps",
       "properties": [
@@ -4543,7 +4592,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 178
+            "line": 252
           },
           "name": "prefixes",
           "type": {
@@ -4565,7 +4614,7 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 144
+            "line": 218
           },
           "name": "bucketName",
           "optional": true,
@@ -4583,16 +4632,207 @@
           "immutable": true,
           "locationInModule": {
             "filename": "src/immukv.ts",
-            "line": 150
+            "line": 224
           },
           "name": "useKmsEncryption",
           "optional": true,
           "type": {
             "primitive": "boolean"
           }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "default": "undefined — no wildcard prefixes",
+            "example": "new ImmuKV(this, 'Store', {\n  prefixes: [{ s3Prefix: '' }],\n  wildcardPrefixes: [\n    { pattern: 'tenant-*\\/logs/' },\n    { pattern: '*\\/config/', oidcReadOnly: true, oidcProviders: [...] },\n  ],\n});",
+            "remarks": "Each entry defines IAM policies using wildcard patterns (e.g., `tenant-*\\/logs/`).\nWildcards work in IAM via `StringLike` conditions and ARN matching but do NOT\nsupport S3 lifecycle rules, notifications, or listing.",
+            "stability": "experimental",
+            "summary": "Wildcard prefix configurations for IAM-only scoping."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 273
+          },
+          "name": "wildcardPrefixes",
+          "optional": true,
+          "type": {
+            "collection": {
+              "elementtype": {
+                "fqn": "cdk-immukv.ImmuKVWildcardPrefixConfig"
+              },
+              "kind": "array"
+            }
+          }
         }
       ],
       "symbolId": "src/immukv:ImmuKVProps"
+    },
+    "cdk-immukv.ImmuKVWildcardPrefixConfig": {
+      "assembly": "cdk-immukv",
+      "datatype": true,
+      "docs": {
+        "example": "// Scope IAM to any tenant's logs:\n{ pattern: 'tenant-*\\/logs/', oidcProviders: [...] }",
+        "remarks": "Wildcards (`*`, `?`) are supported in IAM policies via `StringLike` conditions\nand IAM ARN matching, but do NOT work for S3 lifecycle rules, notifications,\nor listing. This interface therefore only exposes IAM-related options.",
+        "stability": "experimental",
+        "summary": "Configuration for a wildcard-based IAM prefix pattern."
+      },
+      "fqn": "cdk-immukv.ImmuKVWildcardPrefixConfig",
+      "kind": "interface",
+      "locationInModule": {
+        "filename": "src/immukv.ts",
+        "line": 122
+      },
+      "name": "ImmuKVWildcardPrefixConfig",
+      "properties": [
+        {
+          "abstract": true,
+          "docs": {
+            "remarks": "Supports `*` (matches zero or more characters) and `?` (matches exactly one character).\nUsed in IAM policy resource ARNs and `StringLike` conditions on `s3:prefix`.\n\nValidation:\n- Must not be empty\n- Must not start with `/` or contain `..`\n- Must not duplicate another wildcard pattern in the same instance",
+            "stability": "experimental",
+            "summary": "Wildcard prefix pattern for IAM scoping."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 134
+          },
+          "name": "pattern",
+          "type": {
+            "primitive": "string"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "default": "undefined — no OIDC federation",
+            "remarks": "Creates a federated IAM role whose policies are scoped to this pattern only.\nThe role receives this pattern's readWritePolicy by default,\nor readOnlyPolicy if `oidcReadOnly` is true.",
+            "stability": "experimental",
+            "summary": "OIDC identity providers for web identity federation scoped to this wildcard pattern."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 145
+          },
+          "name": "oidcProviders",
+          "optional": true,
+          "type": {
+            "collection": {
+              "elementtype": {
+                "fqn": "cdk-immukv.OidcProvider"
+              },
+              "kind": "array"
+            }
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "default": "false",
+            "remarks": "Only meaningful when `oidcProviders` is set.",
+            "stability": "experimental",
+            "summary": "Whether the federated role gets read-only access instead of read-write."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 152
+          },
+          "name": "oidcReadOnly",
+          "optional": true,
+          "type": {
+            "primitive": "boolean"
+          }
+        }
+      ],
+      "symbolId": "src/immukv:ImmuKVWildcardPrefixConfig"
+    },
+    "cdk-immukv.ImmuKVWildcardPrefixResources": {
+      "assembly": "cdk-immukv",
+      "datatype": true,
+      "docs": {
+        "stability": "experimental",
+        "summary": "Resources created for a single wildcard prefix pattern."
+      },
+      "fqn": "cdk-immukv.ImmuKVWildcardPrefixResources",
+      "kind": "interface",
+      "locationInModule": {
+        "filename": "src/immukv.ts",
+        "line": 187
+      },
+      "name": "ImmuKVWildcardPrefixResources",
+      "properties": [
+        {
+          "abstract": true,
+          "docs": {
+            "stability": "experimental",
+            "summary": "The wildcard pattern string (as provided in the config)."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 189
+          },
+          "name": "pattern",
+          "type": {
+            "primitive": "string"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "remarks": "Same as readWritePolicy but without PutObject.",
+            "stability": "experimental",
+            "summary": "IAM managed policy granting read-only access scoped to this wildcard pattern."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 204
+          },
+          "name": "readOnlyPolicy",
+          "type": {
+            "fqn": "aws-cdk-lib.aws_iam.ManagedPolicy"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "remarks": "Object actions (GetObject, GetObjectVersion, PutObject, HeadObject)\non `bucketArn/${pattern}*`. Bucket actions (ListBucket, ListBucketVersions)\non `bucketArn` with `StringLike` condition on `s3:prefix`.",
+            "stability": "experimental",
+            "summary": "IAM managed policy granting read-write access scoped to this wildcard pattern."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 198
+          },
+          "name": "readWritePolicy",
+          "type": {
+            "fqn": "aws-cdk-lib.aws_iam.ManagedPolicy"
+          }
+        },
+        {
+          "abstract": true,
+          "docs": {
+            "remarks": "Only present when `oidcProviders` was specified.",
+            "stability": "experimental",
+            "summary": "Federated IAM role for OIDC users scoped to this wildcard pattern."
+          },
+          "immutable": true,
+          "locationInModule": {
+            "filename": "src/immukv.ts",
+            "line": 210
+          },
+          "name": "federatedRole",
+          "optional": true,
+          "type": {
+            "fqn": "aws-cdk-lib.aws_iam.Role"
+          }
+        }
+      ],
+      "symbolId": "src/immukv:ImmuKVWildcardPrefixResources"
     },
     "cdk-immukv.OidcProvider": {
       "assembly": "cdk-immukv",
@@ -4672,6 +4912,6 @@
       "symbolId": "src/immukv:OidcProvider"
     }
   },
-  "version": "0.1.25-dev.0",
-  "fingerprint": "TwY//kRFIIP7yFHOTKI07uX/75Eqyzh2wcS8X/bzpso="
+  "version": "0.1.26-dev.0",
+  "fingerprint": "2xGJ/1fzc60Zk4f6cShugQPL6TreLRFWQ/nGongtfck="
 }
