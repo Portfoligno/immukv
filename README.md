@@ -396,7 +396,7 @@ immukv/
 │   │   ├── py.typed             # PEP 561 marker for type hints
 │   │   └── types.py             # Type definitions
 │   ├── stubs/
-│   │   └── wrapt/              # Type stubs for wrapt
+│   │   └── wrapt/               # Type stubs for wrapt
 │   │       ├── __init__.pyi
 │   │       └── proxies.pyi
 │   ├── tests/
