@@ -695,6 +695,134 @@ describe('ImmuKVClient', () => {
     });
   });
 
+  describe('Repaired ETag and orphan repair failure', () => {
+    test('uses repaired ETag when orphan key matches set key (skips headObject)', async () => {
+      // First, create an initial entry so the log exists
+      const entry1 = await client.set('target-key', { data: 'initial' });
+
+      // Mock getLatestAndRepair to simulate: orphan for "target-key" was just repaired
+      const repairedEtag = '"repaired-etag-123"';
+      const spy = jest.spyOn(client as any, 'getLatestAndRepair').mockResolvedValueOnce({
+        logEtag: '"some-log-etag"',
+        prevVersionId: entry1.versionId,
+        prevHash: entry1.hash,
+        sequence: entry1.sequence,
+        canWrite: true,
+        orphanStatus: {
+          isOrphaned: false,
+          orphanKey: 'target-key',
+          orphanEntry: undefined,
+          checkedAt: Date.now(),
+        },
+        repairedKey: 'target-key',
+        repairedKeyObjectEtag: repairedEtag,
+      });
+
+      // Spy on s3.headObject to verify it is NOT called
+      const headSpy = jest.spyOn((client as any).s3, 'headObject');
+
+      const entry2 = await client.set('target-key', { data: 'updated' });
+
+      // headObject should NOT have been called because the repaired ETag was used
+      expect(headSpy).not.toHaveBeenCalled();
+
+      // The set should succeed
+      expect(entry2.key).toBe('target-key');
+      expect(entry2.value).toEqual({ data: 'updated' });
+
+      spy.mockRestore();
+      headSpy.mockRestore();
+    });
+
+    test('falls back to headObject when orphan key differs from set key', async () => {
+      // First, create initial entries so both keys exist
+      await client.set('orphan-key', { data: 'orphan' });
+      const entry1 = await client.set('other-key', { data: 'initial' });
+
+      // Mock getLatestAndRepair to simulate: orphan for "orphan-key" was repaired
+      // but we are setting "other-key"
+      const repairedEtag = '"repaired-etag-456"';
+      const spy = jest.spyOn(client as any, 'getLatestAndRepair').mockResolvedValueOnce({
+        logEtag: '"some-log-etag"',
+        prevVersionId: entry1.versionId,
+        prevHash: entry1.hash,
+        sequence: entry1.sequence,
+        canWrite: true,
+        orphanStatus: {
+          isOrphaned: false,
+          orphanKey: 'orphan-key',
+          orphanEntry: undefined,
+          checkedAt: Date.now(),
+        },
+        repairedKey: 'orphan-key',
+        repairedKeyObjectEtag: repairedEtag,
+      });
+
+      // Spy on s3.headObject to verify it IS called for the different key
+      const headSpy = jest.spyOn((client as any).s3, 'headObject');
+
+      const entry2 = await client.set('other-key', { data: 'updated' });
+
+      // headObject SHOULD have been called because the repaired key != set key
+      expect(headSpy).toHaveBeenCalled();
+
+      // The set should succeed
+      expect(entry2.key).toBe('other-key');
+      expect(entry2.value).toEqual({ data: 'updated' });
+
+      spy.mockRestore();
+      headSpy.mockRestore();
+    });
+
+    test('set() throws when orphan repair has unexpected error', async () => {
+      // First, create an initial entry so the log exists (logEtag will be defined)
+      const entry1 = await client.set('some-key', { data: 'initial' });
+
+      // Mock getLatestAndRepair to simulate: repairOrphan returned [undefined, undefined, undefined]
+      // This means canWrite=undefined, orphanStatus=undefined, and logEtag is defined
+      const spy = jest.spyOn(client as any, 'getLatestAndRepair').mockResolvedValueOnce({
+        logEtag: '"some-log-etag"',
+        prevVersionId: entry1.versionId,
+        prevHash: entry1.hash,
+        sequence: entry1.sequence,
+        canWrite: undefined,
+        orphanStatus: undefined,
+        repairedKey: undefined,
+        repairedKeyObjectEtag: undefined,
+      });
+
+      // set() should throw because orphan repair failed with unexpected error
+      await expect(client.set('some-key', { data: 'new-value' })).rejects.toThrow(
+        'Cannot proceed with set(): orphan repair failed with unexpected error'
+      );
+
+      spy.mockRestore();
+    });
+
+    test('set() does not throw when logEtag is undefined even if canWrite and orphanStatus are undefined', async () => {
+      // Mock getLatestAndRepair to simulate: no log exists yet (first entry)
+      // canWrite=undefined and orphanStatus=undefined, but logEtag is also undefined
+      // This should NOT throw because there's no log to have an orphan
+      const spy = jest.spyOn(client as any, 'getLatestAndRepair').mockResolvedValueOnce({
+        logEtag: undefined,
+        prevVersionId: undefined,
+        prevHash: 'sha256:genesis',
+        sequence: undefined,
+        canWrite: undefined,
+        orphanStatus: undefined,
+        repairedKey: undefined,
+        repairedKeyObjectEtag: undefined,
+      });
+
+      // Should succeed because logEtag is undefined (guard: logEtag !== undefined)
+      const entry = await client.set('first-key', { data: 'first-value' });
+      expect(entry.key).toBe('first-key');
+      expect(entry.value).toEqual({ data: 'first-value' });
+
+      spy.mockRestore();
+    });
+  });
+
   describe('Credential Features', () => {
     test('session token passthrough does not break client', async () => {
       // Close the default client from beforeEach since we create our own
