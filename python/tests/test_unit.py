@@ -295,7 +295,7 @@ def test_credential_provider_refresh_adapter() -> None:
 
     from aiobotocore.credentials import AioDeferredRefreshableCredentials
 
-    expires = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+    expires = datetime(2030, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
 
     async def my_provider() -> S3Credentials:
         return S3Credentials(
@@ -341,7 +341,7 @@ def test_credential_provider_session_injection() -> None:
             aws_access_key_id="INJECT_AKID",
             aws_secret_access_key="INJECT_SECRET",
             aws_session_token="INJECT_TOKEN",
-            expires_at=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
+            expires_at=datetime(2030, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
         )
 
     async def run_test() -> None:
