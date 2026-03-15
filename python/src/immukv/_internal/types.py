@@ -45,7 +45,7 @@ class LogEntryForHash(TypedDict, Generic[K, V]):
     previous_hash: Hash[K]
 
 
-class OrphanStatus(TypedDict, Generic[K], total=False):
+class OrphanStatus(TypedDict, Generic[K]):
     """Type definition for cached orphan status.
 
     Used to track whether the latest log entry is orphaned and cache
@@ -61,7 +61,7 @@ class OrphanStatus(TypedDict, Generic[K], total=False):
     checked_at: int  # Timestamp when this check was performed (client-level)
 
 
-class LatestLogState(TypedDict, Generic[K], total=False):
+class LatestLogState(TypedDict, Generic[K]):
     """Type definition for latest log state returned by _get_latest_and_repair.
 
     Contains information about the current log state and orphan repair results.

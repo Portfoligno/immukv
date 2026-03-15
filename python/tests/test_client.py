@@ -759,9 +759,10 @@ def test_orphan_status_none_does_not_trigger_orphan_fallback(
         previous_key_object_etag=entry.previous_key_object_etag,
     )
 
-    # OrphanStatus with total=False allows omitting is_orphaned entirely,
-    # which is the Python equivalent of TypeScript's isOrphaned: undefined
-    client._latest_orphan_status = {
+    # Intentionally malformed OrphanStatus: omit is_orphaned and checked_at
+    # to simulate undefined/missing state. Uses type: ignore to bypass
+    # TypedDict requirements (matches TypeScript's `as any` pattern).
+    client._latest_orphan_status = {  # type: ignore[assignment]
         "orphan_key": "nonexistent-key",
         "orphan_entry": raw_entry,
     }
@@ -786,7 +787,7 @@ def test_orphan_status_none_does_not_trigger_orphan_fallback(
         previous_key_object_etag=entry2.previous_key_object_etag,
     )
 
-    client._latest_orphan_status = {
+    client._latest_orphan_status = {  # type: ignore[assignment]
         "orphan_key": "test-key",
         "orphan_entry": raw_entry2,
     }
