@@ -427,7 +427,7 @@ class ImmuKVClient(Generic[K, V]):
         # Check if we need to perform orphan repair check
         if time_since_last_check >= self._config.repair_check_interval_ms:
             # Skip repair attempt if we know we're read-only
-            if not (self._can_write is False or self._config.read_only):
+            if self._can_write is not False and not self._config.read_only:
                 # Perform orphan check and repair
                 result = self._get_latest_and_repair()
                 if result["can_write"] is not None:
