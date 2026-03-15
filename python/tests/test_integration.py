@@ -670,6 +670,67 @@ def test_repaired_etag_with_different_keys(
     assert client.verify_log_chain() is True
 
 
+def test_chain_integrity_maintained_after_orphan_repair(
+    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+) -> None:
+    """After orphan repair, subsequent normal writes maintain chain integrity.
+
+    Creates an orphan, repairs it via set(), then performs multiple normal
+    writes and verifies: sequence numbers, hash chain linkage,
+    verify_log_chain(), and history() returns all entries.
+    """
+    # Step 1: Write initial entry
+    entry1 = client.set("chain-key", {"step": 1})
+    assert entry1.sequence == 0
+
+    # Get current key object ETag
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/chain-key.json")
+    head_response = s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
+    current_key_etag = head_response["ETag"]
+
+    # Step 2: Create orphan by writing a log entry directly (no key object update)
+    _create_orphan_log_entry(
+        client,
+        s3_client,
+        key="chain-key",
+        value={"step": 2},
+        prev_entry=entry1,
+        prev_key_etag=current_key_etag,
+    )
+
+    # Step 3: set() should repair the orphan and succeed via repaired ETag
+    # Sequence: entry1 (seq 0), orphan log (seq 1), entry2 (seq 2)
+    entry2 = client.set("chain-key", {"step": 3})
+    assert entry2.sequence == 2
+
+    # Step 4: Normal set (no orphan) — key object exists from previous set()
+    entry3 = client.set("chain-key", {"step": 4})
+    assert entry3.sequence == 3
+    assert entry3.previous_hash == entry2.hash
+
+    # Step 5: One more normal set
+    entry4 = client.set("chain-key", {"step": 5})
+    assert entry4.sequence == 4
+    assert entry4.previous_hash == entry3.hash
+
+    # Verify full chain integrity
+    assert client.verify_log_chain() is True
+
+    # Verify history returns all entries for this key
+    history_entries, _ = client.history("chain-key", before_version_id=None, limit=None)
+    # history returns newest first; we expect entries for seq 0, 1 (orphan repaired), 2, 3, 4
+    # The key object versions are: entry1 (seq 0), repaired orphan (seq 1), entry2 (seq 2),
+    # entry3 (seq 3), entry4 (seq 4)
+    assert len(history_entries) >= 4  # At least the key-object-backed entries
+    # Latest entry should be step 5
+    assert history_entries[0].value == {"step": 5}
+    assert history_entries[0].sequence == 4
+
+    # Verify latest value via get()
+    retrieved = client.get("chain-key")
+    assert retrieved.value == {"step": 5}
+
+
 def test_orphan_repair_failure_guard_not_triggered_on_first_entry(
     client: ImmuKVClient[str, object],
 ) -> None:

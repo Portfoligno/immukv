@@ -761,14 +761,14 @@ export class ImmuKVClient<K extends string = string, V = any> {
   }
 
   private async getLatestAndRepair(): Promise<{
-    logEtag?: string;
-    prevVersionId?: LogVersionId<K>;
+    logEtag: string | undefined;
+    prevVersionId: LogVersionId<K> | undefined;
     prevHash: Hash<K>;
-    sequence?: Sequence<K>;
-    canWrite?: boolean;
-    orphanStatus?: OrphanStatus<K>;
-    repairedKey?: K;
-    repairedKeyObjectEtag?: KeyObjectETag<K>;
+    sequence: Sequence<K>;
+    canWrite: boolean | undefined;
+    orphanStatus: OrphanStatus<K> | undefined;
+    repairedKey: K | undefined;
+    repairedKeyObjectEtag: KeyObjectETag<K> | undefined;
   }> {
     try {
       const response = await this.s3.getObject({
@@ -813,8 +813,14 @@ export class ImmuKVClient<K extends string = string, V = any> {
     } catch (error: any) {
       if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
         return {
+          logEtag: undefined,
+          prevVersionId: undefined,
           prevHash: hashGenesis<K>(),
           sequence: sequenceInitial<K>(),
+          canWrite: undefined,
+          orphanStatus: undefined,
+          repairedKey: undefined,
+          repairedKeyObjectEtag: undefined,
         };
       }
       throw error;

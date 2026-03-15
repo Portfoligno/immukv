@@ -54,9 +54,9 @@ export interface OrphanStatus<K extends string = string> {
   /** True if latest entry is orphaned */
   isOrphaned: boolean;
   /** Key name of the orphaned entry (if orphaned) */
-  orphanKey?: K;
+  orphanKey: K | undefined;
   /** Full entry data (if orphaned) — raw JSONValue, not decoded */
-  orphanEntry?: RawLogEntry<K>;
+  orphanEntry: RawLogEntry<K> | undefined;
   /** Timestamp when this check was performed */
   checkedAt: number;
 }
