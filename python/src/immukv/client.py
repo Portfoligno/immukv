@@ -230,6 +230,8 @@ class ImmuKVClient(Generic[K, V]):
             sequence = result["sequence"]
             can_write = result["can_write"]
             orphan_status = result["orphan_status"]
+            repaired_key = result.get("repaired_key")
+            repaired_key_object_etag = result.get("repaired_key_object_etag")
 
             # Update cached state
             if can_write is not None:
@@ -238,19 +240,35 @@ class ImmuKVClient(Generic[K, V]):
                 self._latest_orphan_status = orphan_status
             self._last_repair_check_ms = int(time.time() * 1000)
 
+            # Part 2: Fail if orphan repair was not successful
+            # can_write=None and orphan_status=None means _repair_orphan hit an unexpected error
+            # The orphan still exists, so proceeding would create a second orphan
+            if log_etag is not None and can_write is None and orphan_status is None:
+                raise Exception(
+                    "Cannot proceed with set(): orphan repair failed with unexpected error. "
+                    "Only one outstanding orphan is allowed at a time."
+                )
+
             # ===== Write Phase 1: Append to Global Log (with optimistic locking) =====
 
             # Step 1: Get current key object ETag (for storing in log entry)
+            # If the repaired orphan's key matches the target key, use the repaired ETag
+            # instead of doing a separate head_object (avoids stale ETag from eventual consistency)
             key_path = S3KeyPaths.for_key(self._config.s3_prefix, key)
             current_key_etag: Optional[KeyObjectETag[K]] = None
-            try:
-                current_key = self._s3.head_object(bucket=self._config.s3_bucket, key=key_path)
-                current_key_etag = HeadObjectOutputs.key_object_etag(current_key)
-            except ClientError as e:  # type: ignore[misc]
-                if get_error_code(e) in ["NoSuchKey", "404"]:
-                    current_key_etag = None
-                else:
-                    raise
+
+            if repaired_key == key and repaired_key_object_etag is not None:
+                # Use the ETag from the repair put_object - guaranteed fresh
+                current_key_etag = repaired_key_object_etag
+            else:
+                try:
+                    current_key = self._s3.head_object(bucket=self._config.s3_bucket, key=key_path)
+                    current_key_etag = HeadObjectOutputs.key_object_etag(current_key)
+                except ClientError as e:  # type: ignore[misc]
+                    if get_error_code(e) in ["NoSuchKey", "404"]:
+                        current_key_etag = None
+                    else:
+                        raise
 
             # Step 2: Create new log entry
             new_sequence: Sequence[K] = (
@@ -313,7 +331,7 @@ class ImmuKVClient(Generic[K, V]):
                         "S3 response missing VersionId - versioning must be enabled on bucket"
                     )
                 new_log_version_id: LogVersionId[K] = new_log_version_id_opt
-                break  # ✅ Committed to log! Exit retry loop
+                break  # Committed to log! Exit retry loop
 
             except ClientError as e:  # type: ignore[misc]
                 if get_error_code(e) == "PreconditionFailed":
@@ -929,6 +947,8 @@ class ImmuKVClient(Generic[K, V]):
             sequence: Current sequence number
             can_write: Whether client has write permission (or None if unknown)
             orphan_status: Current orphan status (or None if unchanged)
+            repaired_key: Key of the repaired orphan (if repair was attempted)
+            repaired_key_object_etag: ETag from repair put_object (if successful)
         """
         # Try to read current log
         try:
@@ -945,7 +965,7 @@ class ImmuKVClient(Generic[K, V]):
             latest_entry: RawEntry[K] = raw_entry_from_log(data, current_version_id)
 
             # Try to repair orphan
-            can_write, orphan_status = self._repair_orphan(latest_entry)
+            can_write, orphan_status, repaired_etag = self._repair_orphan(latest_entry)
 
             return {
                 "log_etag": log_etag,
@@ -954,6 +974,8 @@ class ImmuKVClient(Generic[K, V]):
                 "sequence": sequence,
                 "can_write": can_write,
                 "orphan_status": orphan_status,
+                "repaired_key": latest_entry.key if repaired_etag is not None else None,
+                "repaired_key_object_etag": repaired_etag,
             }
 
         except ClientError as e:  # type: ignore[misc]
@@ -966,12 +988,14 @@ class ImmuKVClient(Generic[K, V]):
                     "sequence": sequence_initial(),
                     "can_write": None,
                     "orphan_status": None,
+                    "repaired_key": None,
+                    "repaired_key_object_etag": None,
                 }
             raise
 
     def _repair_orphan(
         self, latest_log: RawEntry[K]
-    ) -> Tuple[Optional[bool], Optional[OrphanStatus[K]]]:
+    ) -> Tuple[Optional[bool], Optional[OrphanStatus[K]], Optional[KeyObjectETag[K]]]:
         """Repair orphaned log entry by propagating to key object.
 
         Uses stored previous ETag from log entry for idempotent conditional write.
@@ -980,7 +1004,7 @@ class ImmuKVClient(Generic[K, V]):
             latest_log: The latest log entry to repair
 
         Returns:
-            Tuple of (can_write, orphan_status)
+            Tuple of (can_write, orphan_status, repaired_key_object_etag)
         """
         # Skip if in read-only mode or we know we can't write
         if self._config.read_only or self._can_write is False:
@@ -995,7 +1019,7 @@ class ImmuKVClient(Generic[K, V]):
                     "orphan_entry": None,
                     "checked_at": int(time.time() * 1000),
                 }
-                return (self._can_write, orphan_status)
+                return (self._can_write, orphan_status, None)
             except ClientError as e:  # type: ignore[misc]
                 if get_error_code(e) in ["NoSuchKey", "404"]:
                     # Key object missing - orphaned
@@ -1005,7 +1029,7 @@ class ImmuKVClient(Generic[K, V]):
                         "orphan_entry": latest_log,
                         "checked_at": int(time.time() * 1000),
                     }
-                    return (False, orphan_status)
+                    return (False, orphan_status, None)
                 raise
 
         current_time_ms = int(time.time() * 1000)
@@ -1025,7 +1049,7 @@ class ImmuKVClient(Generic[K, V]):
         try:
             if latest_log.previous_key_object_etag is not None:
                 # UPDATE with if_match=<previous_etag>
-                self._s3.put_object(
+                response = self._s3.put_object(
                     bucket=self._config.s3_bucket,
                     key=key_path,
                     body=dumps_canonical(cast(JSONValue, repair_data)),
@@ -1035,7 +1059,7 @@ class ImmuKVClient(Generic[K, V]):
                 logger.info(f"Propagated log entry to key object for {latest_log.key}")
             else:
                 # CREATE with if_none_match='*'
-                self._s3.put_object(
+                response = self._s3.put_object(
                     bucket=self._config.s3_bucket,
                     key=key_path,
                     body=dumps_canonical(cast(JSONValue, repair_data)),
@@ -1044,6 +1068,9 @@ class ImmuKVClient(Generic[K, V]):
                 )
                 logger.info(f"Created key object for {latest_log.key}")
 
+            # Capture the key object ETag from the put_object response
+            repaired_etag: KeyObjectETag[K] = PutObjectOutputs.key_object_etag(response)
+
             # Success
             orphan_status = {
                 "is_orphaned": False,
@@ -1051,7 +1078,7 @@ class ImmuKVClient(Generic[K, V]):
                 "orphan_entry": None,
                 "checked_at": current_time_ms,
             }
-            return (True, orphan_status)
+            return (True, orphan_status, repaired_etag)
 
         except ClientError as e:  # type: ignore[misc]
             error_code = get_error_code(e)
@@ -1064,7 +1091,7 @@ class ImmuKVClient(Generic[K, V]):
                     "orphan_entry": None,
                     "checked_at": current_time_ms,
                 }
-                return (True, orphan_status)
+                return (True, orphan_status, None)
 
             elif error_code in ["AccessDenied", "Forbidden"]:
                 # No write permission - cache this
@@ -1075,9 +1102,9 @@ class ImmuKVClient(Generic[K, V]):
                     "checked_at": current_time_ms,
                 }
                 logger.info("Read-only mode detected - orphan repair disabled")
-                return (False, orphan_status)
+                return (False, orphan_status, None)
 
             else:
                 # Other error - log but don't fail
                 logger.warning(f"Pre-flight repair failed: {e}")
-                return (None, None)
+                return (None, None, None)

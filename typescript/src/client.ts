@@ -83,7 +83,16 @@ export class ImmuKVClient<K extends string = string, V = any> {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       // Pre-flight: Repair
       const result = await this.getLatestAndRepair();
-      const { logEtag, prevVersionId, prevHash, sequence, canWrite, orphanStatus } = result;
+      const {
+        logEtag,
+        prevVersionId,
+        prevHash,
+        sequence,
+        canWrite,
+        orphanStatus,
+        repairedKey,
+        repairedKeyObjectEtag,
+      } = result;
 
       if (canWrite !== undefined) {
         this.canWrite = canWrite;
@@ -93,21 +102,37 @@ export class ImmuKVClient<K extends string = string, V = any> {
       }
       this.lastRepairCheckMs = Date.now();
 
+      // Fail if orphan repair was not successful.
+      // canWrite=undefined and orphanStatus=undefined means repairOrphan hit an unexpected error.
+      // The orphan still exists, so proceeding would create a second orphan.
+      // Only applies when log exists (logEtag defined) — no log means no prior entry to orphan.
+      if (logEtag !== undefined && canWrite === undefined && orphanStatus === undefined) {
+        throw new Error(
+          'Cannot proceed with set(): orphan repair failed with unexpected error. ' +
+            'Only one outstanding orphan is allowed at a time.'
+        );
+      }
+
       // Phase 1: Write to log
       const keyPath = S3KeyPaths.forKey(this.config.s3Prefix, key);
       let currentKeyEtag: KeyObjectETag<K> | undefined;
 
-      try {
-        const headResponse = await this.s3.headObject({
-          Bucket: this.config.s3Bucket,
-          Key: keyPath,
-        });
-        currentKeyEtag = HeadObjectCommandOutputs.keyObjectEtag(headResponse);
-      } catch (error: any) {
-        if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
-          currentKeyEtag = undefined;
-        } else {
-          throw error;
+      if (repairedKey === key && repairedKeyObjectEtag !== undefined) {
+        // Use the ETag from the repair — guaranteed fresh since repairOrphan just wrote this key object
+        currentKeyEtag = repairedKeyObjectEtag;
+      } else {
+        try {
+          const headResponse = await this.s3.headObject({
+            Bucket: this.config.s3Bucket,
+            Key: keyPath,
+          });
+          currentKeyEtag = HeadObjectCommandOutputs.keyObjectEtag(headResponse);
+        } catch (error: any) {
+          if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+            currentKeyEtag = undefined;
+          } else {
+            throw error;
+          }
         }
       }
 
@@ -742,6 +767,8 @@ export class ImmuKVClient<K extends string = string, V = any> {
     sequence?: Sequence<K>;
     canWrite?: boolean;
     orphanStatus?: OrphanStatus<K>;
+    repairedKey?: K;
+    repairedKeyObjectEtag?: KeyObjectETag<K>;
   }> {
     try {
       const response = await this.s3.getObject({
@@ -771,7 +798,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
             : undefined,
       };
 
-      const [canWrite, orphanStatus] = await this.repairOrphan(latestEntry);
+      const [canWrite, orphanStatus, repairedKeyObjectEtag] = await this.repairOrphan(latestEntry);
 
       return {
         logEtag,
@@ -780,6 +807,8 @@ export class ImmuKVClient<K extends string = string, V = any> {
         sequence: sequenceFromJson<K>(data.sequence as number),
         canWrite,
         orphanStatus,
+        repairedKey: repairedKeyObjectEtag !== undefined ? latestEntry.key : undefined,
+        repairedKeyObjectEtag,
       };
     } catch (error: any) {
       if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
@@ -794,7 +823,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
 
   private async repairOrphan(
     latestLog: RawLogEntry<K>
-  ): Promise<[boolean | undefined, OrphanStatus<K> | undefined]> {
+  ): Promise<[boolean | undefined, OrphanStatus<K> | undefined, KeyObjectETag<K> | undefined]> {
     if (this.config.readOnly === true || this.canWrite === false) {
       const keyPath = S3KeyPaths.forKey(this.config.s3Prefix, latestLog.key);
       try {
@@ -810,6 +839,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
             orphanEntry: undefined,
             checkedAt: Date.now(),
           },
+          undefined,
         ];
       } catch (error: any) {
         if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
@@ -821,6 +851,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
               orphanEntry: latestLog,
               checkedAt: Date.now(),
             },
+            undefined,
           ];
         }
         throw error;
@@ -841,7 +872,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
     };
 
     try {
-      await this.s3.putObject({
+      const putResponse = await this.s3.putObject({
         Bucket: this.config.s3Bucket,
         Key: keyPath,
         Body: stringifyCanonical(repairData as JSONValue),
@@ -851,6 +882,8 @@ export class ImmuKVClient<K extends string = string, V = any> {
           : { IfNoneMatch: '*' }),
       });
 
+      const repairedEtag = PutObjectCommandOutputs.keyObjectEtag<K>(putResponse);
+
       return [
         true,
         {
@@ -859,6 +892,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
           orphanEntry: undefined,
           checkedAt: currentTimeMs,
         },
+        repairedEtag,
       ];
     } catch (error: any) {
       if (error.name === 'PreconditionFailed' || error.$metadata?.httpStatusCode === 412) {
@@ -870,6 +904,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
             orphanEntry: undefined,
             checkedAt: currentTimeMs,
           },
+          undefined,
         ];
       } else if (
         error.name === 'AccessDenied' ||
@@ -885,10 +920,11 @@ export class ImmuKVClient<K extends string = string, V = any> {
             orphanEntry: latestLog,
             checkedAt: currentTimeMs,
           },
+          undefined,
         ];
       } else {
         console.warn('Pre-flight repair failed:', error);
-        return [undefined, undefined];
+        return [undefined, undefined, undefined];
       }
     }
   }

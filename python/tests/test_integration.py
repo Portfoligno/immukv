@@ -88,7 +88,9 @@ def raw_s3(_aio_loop: asyncio.AbstractEventLoop) -> Generator["S3Client", None, 
 
 def _run_sync(coro: object, loop: asyncio.AbstractEventLoop) -> dict[str, object]:
     """Run a coroutine on the background loop, blocking until complete."""
-    future: concurrent.futures.Future[dict[str, object]] = asyncio.run_coroutine_threadsafe(coro, loop)  # type: ignore[arg-type]
+    future: concurrent.futures.Future[dict[str, object]] = asyncio.run_coroutine_threadsafe(
+        coro, loop
+    )  # type: ignore[arg-type]
     return future.result()
 
 
@@ -126,7 +128,9 @@ def s3_bucket(
         for version in response.get("Versions", []):  # type: ignore[misc,attr-defined]
             _run_sync(
                 raw_s3.delete_object(
-                    Bucket=bucket_name, Key=version["Key"], VersionId=version["VersionId"]  # type: ignore[misc]
+                    Bucket=bucket_name,
+                    Key=version["Key"],
+                    VersionId=version["VersionId"],  # type: ignore[misc]
                 ),
                 _aio_loop,
             )
@@ -135,7 +139,9 @@ def s3_bucket(
         for marker in response.get("DeleteMarkers", []):  # type: ignore[misc,attr-defined]
             _run_sync(
                 raw_s3.delete_object(
-                    Bucket=bucket_name, Key=marker["Key"], VersionId=marker["VersionId"]  # type: ignore[misc]
+                    Bucket=bucket_name,
+                    Key=marker["Key"],
+                    VersionId=marker["VersionId"],  # type: ignore[misc]
                 ),
                 _aio_loop,
             )
@@ -329,9 +335,9 @@ def test_log_object_structure_matches_spec(
     # Optional fields should be omitted for genesis entry (None/undefined stripped)
     # previous_version_id and previous_key_object_etag are NotRequired[Optional[str]]
     assert "previous_version_id" not in log_data, "Genesis entry should omit previous_version_id"
-    assert (
-        "previous_key_object_etag" not in log_data
-    ), "Genesis entry should omit previous_key_object_etag"
+    assert "previous_key_object_etag" not in log_data, (
+        "Genesis entry should omit previous_key_object_etag"
+    )
 
 
 def test_key_object_structure_matches_spec(

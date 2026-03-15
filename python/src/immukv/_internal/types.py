@@ -72,7 +72,9 @@ class LatestLogState(TypedDict, Generic[K], total=False):
     prev_hash: Hash[K]  # Previous entry hash
     sequence: Sequence[K]  # Current sequence number
     can_write: Optional[bool]  # Whether client has write permission
-    orphan_status: Optional[OrphanStatus[K]]  # Current orphan status
+    orphan_status: Optional[OrphanStatus[K]]
+    repaired_key: Optional[K]  # Key of the repaired orphan (if repair was attempted)
+    repaired_key_object_etag: Optional[KeyObjectETag[K]]  # ETag from repair put_object
 
 
 class LogEntryDict(TypedDict):
