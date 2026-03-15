@@ -542,7 +542,7 @@ def test_set_throws_when_orphan_repair_has_unexpected_error() -> None:
     with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
         # set() should raise because orphan repair failed with unexpected error
         with pytest.raises(
-            Exception,
+            RuntimeError,
             match="Cannot proceed with set\\(\\): orphan repair failed with unexpected error",
         ):
             client.set("some-key", {"data": "new-value"})

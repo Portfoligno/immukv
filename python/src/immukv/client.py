@@ -230,8 +230,8 @@ class ImmuKVClient(Generic[K, V]):
             sequence = result["sequence"]
             can_write = result["can_write"]
             orphan_status = result["orphan_status"]
-            repaired_key = result.get("repaired_key")
-            repaired_key_object_etag = result.get("repaired_key_object_etag")
+            repaired_key = result["repaired_key"]
+            repaired_key_object_etag = result["repaired_key_object_etag"]
 
             # Update cached state
             if can_write is not None:
@@ -244,7 +244,7 @@ class ImmuKVClient(Generic[K, V]):
             # can_write=None and orphan_status=None means _repair_orphan hit an unexpected error
             # The orphan still exists, so proceeding would create a second orphan
             if log_etag is not None and can_write is None and orphan_status is None:
-                raise Exception(
+                raise RuntimeError(
                     "Cannot proceed with set(): orphan repair failed with unexpected error. "
                     "Only one outstanding orphan is allowed at a time."
                 )
