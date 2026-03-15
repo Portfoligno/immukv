@@ -85,8 +85,8 @@ def raw_s3(_aio_loop: asyncio.AbstractEventLoop) -> Generator["S3Client", None, 
 def _run_sync(coro: object, loop: asyncio.AbstractEventLoop) -> dict[str, object]:
     """Run a coroutine on the background loop, blocking until complete."""
     future: concurrent.futures.Future[dict[str, object]] = asyncio.run_coroutine_threadsafe(
-        coro, loop
-    )  # type: ignore[arg-type]
+        coro, loop  # type: ignore[arg-type]
+    )
     return future.result()
 
 
@@ -119,7 +119,7 @@ def s3_bucket(
             _run_sync(
                 raw_s3.delete_object(
                     Bucket=bucket_name,
-                    Key=version["Key"],
+                    Key=version["Key"],  # type: ignore[misc]
                     VersionId=version["VersionId"],  # type: ignore[misc]
                 ),
                 _aio_loop,
@@ -130,7 +130,7 @@ def s3_bucket(
             _run_sync(
                 raw_s3.delete_object(
                     Bucket=bucket_name,
-                    Key=marker["Key"],
+                    Key=marker["Key"],  # type: ignore[misc]
                     VersionId=marker["VersionId"],  # type: ignore[misc]
                 ),
                 _aio_loop,
