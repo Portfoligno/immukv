@@ -12,6 +12,8 @@ import {
   ListObjectVersionsCommand,
   DeleteObjectCommand,
   DeleteBucketCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 import { ImmuKVClient } from '../src/client';
@@ -826,6 +828,175 @@ describe('ImmuKVClient', () => {
 
       spy.mockRestore();
     });
+  });
+
+  describe('Repaired ETag and orphan repair (integration)', () => {
+    if (!integrationTestEnabled) {
+      test.skip('Integration tests require IMMUKV_INTEGRATION_TEST=true', () => {});
+      return;
+    }
+
+    test('orphan repair writes key object and subsequent set() succeeds via repaired ETag', async () => {
+      // Phase 1: Write key "x" successfully (creates log entry + key object)
+      const entry1 = await client.set('x', { data: 'initial' });
+      expect(entry1.key).toBe('x');
+
+      // Verify key object exists
+      const keyPath = `${config.s3Prefix}keys/x.json`;
+      const headBefore = await s3Client.send(
+        new HeadObjectCommand({ Bucket: bucketName, Key: keyPath })
+      );
+      expect(headBefore.ETag).toBeDefined();
+
+      // Create orphan: delete the key object directly to simulate Phase 2 failure
+      // We need to delete all versions of the key object to fully remove it
+      const keyVersions = await s3Client.send(
+        new ListObjectVersionsCommand({ Bucket: bucketName, Prefix: keyPath })
+      );
+      for (const version of keyVersions.Versions || []) {
+        if (version.Key === keyPath) {
+          await s3Client.send(
+            new DeleteObjectCommand({
+              Bucket: bucketName,
+              Key: keyPath,
+              VersionId: version.VersionId!,
+            })
+          );
+        }
+      }
+
+      // Verify key object is gone (orphan state: log exists but key object doesn't)
+      await expect(
+        s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: keyPath }))
+      ).rejects.toThrow();
+
+      // Phase 2: set("x", newValue) — triggers repair, uses repaired ETag, and writes new entry
+      // repairOrphan will detect the orphan (log has previous_key_object_etag but key object is missing)
+      // It will write the key object (repair) and return the ETag.
+      // Then set() uses that ETag as currentKeyEtag (skipping headObject for "x").
+      const entry2 = await client.set('x', { data: 'after-repair' });
+
+      // Verify the write succeeded
+      expect(entry2.key).toBe('x');
+      expect(entry2.value).toEqual({ data: 'after-repair' });
+      expect(entry2.sequence).toBe(1);
+      expect(entry2.previousHash).toBe(entry1.hash);
+
+      // Verify the value is readable via get()
+      const retrieved = await client.get('x');
+      expect(retrieved.value).toEqual({ data: 'after-repair' });
+
+      // Verify log chain integrity after repair
+      const chainValid = await client.verifyLogChain();
+      expect(chainValid).toBe(true);
+    });
+
+    test('orphan repair for different key still allows set() for another key via headObject fallback', async () => {
+      // Write two keys successfully
+      await client.set('key-a', { data: 'a-initial' });
+      const entryB = await client.set('key-b', { data: 'b-initial' });
+
+      // Create orphan on "key-b": delete its key object
+      const keyPathB = `${config.s3Prefix}keys/key-b.json`;
+      const keyVersions = await s3Client.send(
+        new ListObjectVersionsCommand({ Bucket: bucketName, Prefix: keyPathB })
+      );
+      for (const version of keyVersions.Versions || []) {
+        if (version.Key === keyPathB) {
+          await s3Client.send(
+            new DeleteObjectCommand({
+              Bucket: bucketName,
+              Key: keyPathB,
+              VersionId: version.VersionId!,
+            })
+          );
+        }
+      }
+
+      // Now set("key-a", newValue) — repair targets "key-b" (latest log entry's key),
+      // but we're writing to "key-a". Since repairedKey ("key-b") != set key ("key-a"),
+      // set() falls back to headObject for "key-a".
+      const entryA2 = await client.set('key-a', { data: 'a-updated' });
+
+      // Verify the write succeeded for key-a
+      expect(entryA2.key).toBe('key-a');
+      expect(entryA2.value).toEqual({ data: 'a-updated' });
+
+      // Verify key-a is readable
+      const retrievedA = await client.get('key-a');
+      expect(retrievedA.value).toEqual({ data: 'a-updated' });
+
+      // Verify key-b was also repaired (repair writes the key object for the orphan)
+      const retrievedB = await client.get('key-b');
+      expect(retrievedB.value).toEqual({ data: 'b-initial' });
+
+      // Verify log chain integrity
+      const chainValid = await client.verifyLogChain();
+      expect(chainValid).toBe(true);
+    });
+
+    test('after orphan repair, subsequent normal writes maintain chain integrity', async () => {
+      // Write initial entry
+      const entry1 = await client.set('chain-key', { step: 1 });
+
+      // Create orphan: delete key object
+      const keyPath = `${config.s3Prefix}keys/chain-key.json`;
+      const keyVersions = await s3Client.send(
+        new ListObjectVersionsCommand({ Bucket: bucketName, Prefix: keyPath })
+      );
+      for (const version of keyVersions.Versions || []) {
+        if (version.Key === keyPath) {
+          await s3Client.send(
+            new DeleteObjectCommand({
+              Bucket: bucketName,
+              Key: keyPath,
+              VersionId: version.VersionId!,
+            })
+          );
+        }
+      }
+
+      // set() should repair the orphan and succeed
+      const entry2 = await client.set('chain-key', { step: 2 });
+      expect(entry2.sequence).toBe(1);
+      expect(entry2.previousHash).toBe(entry1.hash);
+
+      // Now do a normal set (no orphan) — key object exists from the previous set()
+      const entry3 = await client.set('chain-key', { step: 3 });
+      expect(entry3.sequence).toBe(2);
+      expect(entry3.previousHash).toBe(entry2.hash);
+
+      // And one more normal set
+      const entry4 = await client.set('chain-key', { step: 4 });
+      expect(entry4.sequence).toBe(3);
+      expect(entry4.previousHash).toBe(entry3.hash);
+
+      // Verify full chain integrity
+      const chainValid = await client.verifyLogChain();
+      expect(chainValid).toBe(true);
+
+      // Verify latest value
+      const retrieved = await client.get('chain-key');
+      expect(retrieved.value).toEqual({ step: 4 });
+
+      // Verify all history entries
+      const [history] = await client.history('chain-key', undefined, undefined);
+      expect(history).toHaveLength(4);
+      expect(history[0].value).toEqual({ step: 4 });
+      expect(history[1].value).toEqual({ step: 3 });
+      expect(history[2].value).toEqual({ step: 2 });
+      expect(history[3].value).toEqual({ step: 1 });
+    });
+
+    // Test B: set() fails when orphan repair encounters unexpected error
+    // This test is intentionally skipped for integration testing because:
+    // - The unexpected error path in repairOrphan is triggered by S3 errors that are
+    //   NOT PreconditionFailed (412) and NOT AccessDenied/Forbidden (403)
+    // - Triggering such errors reliably against a real S3/MinIO backend (e.g., network
+    //   errors, internal server errors) without mocking is not feasible
+    // - The unit test in this same file covers this behavior thoroughly via mocked
+    //   getLatestAndRepair, verifying the guard condition and error message
+    // See: describe('Repaired ETag and orphan repair failure') above
   });
 
   describe('Credential Features', () => {

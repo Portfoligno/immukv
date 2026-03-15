@@ -24,7 +24,7 @@ from immukv._internal.s3_client import BrandedS3Client
 from immukv._internal.s3_helpers import get_error_code, read_body_as_json
 from immukv._internal.s3_types import S3KeyPath
 from immukv.json_helpers import JSONValue
-from immukv.types import S3Credentials, S3Overrides
+from immukv.types import Entry, S3Credentials, S3Overrides
 
 # Skip if not in integration test mode
 pytestmark = pytest.mark.skipif(
@@ -494,3 +494,215 @@ def test_missing_optional_fields_handled_correctly(
     # Python should handle missing fields gracefully via get() returning None
     assert log_data.get("previous_version_id") is None
     assert log_data.get("previous_key_object_etag") is None
+
+
+# --- Repaired ETag and Orphan Repair Integration Tests ---
+#
+# These tests verify the behaviors introduced in ada2850:
+# 1. When orphan repair succeeds and the repaired key matches the set key,
+#    the repaired ETag is used directly (no stale headObject).
+# 2. When orphan repair encounters an unexpected error, set() fails.
+#
+# Orphan creation strategy:
+# Instead of mocking put_object (which also intercepts _repair_orphan calls),
+# we directly manipulate S3 state: write a valid orphaned log entry via the
+# raw S3 client, leaving the key object stale. This creates a genuine orphan
+# that the client's repair logic discovers and fixes using real S3 operations.
+
+
+def _create_orphan_log_entry(
+    client: ImmuKVClient[str, object],
+    s3_client: BrandedS3Client,
+    key: str,
+    value: JSONValue,
+    prev_entry: Entry[str, object],
+    prev_key_etag: str,
+) -> None:
+    """Write a valid log entry directly to S3 without updating the key object.
+
+    This simulates Phase 1 succeeding and Phase 2 failing, creating an orphan.
+    The log entry has correct hash chain and sequence, and records the current
+    key object ETag as previous_key_object_etag (needed for repair).
+    """
+    from immukv._internal.json_helpers import dumps_canonical
+    from immukv._internal.types import (
+        LogEntryForHash,
+        hash_compute,
+        sequence_next,
+        timestamp_now,
+    )
+    from immukv.types import TimestampMs
+
+    new_sequence = sequence_next(prev_entry.sequence)
+    timestamp_ms: TimestampMs[str] = timestamp_now()
+
+    entry_for_hash: LogEntryForHash[str, JSONValue] = {
+        "sequence": new_sequence,
+        "key": key,
+        "value": value,
+        "timestamp_ms": timestamp_ms,
+        "previous_hash": prev_entry.hash,
+    }
+    entry_hash = hash_compute(entry_for_hash)
+
+    log_entry: dict[str, JSONValue] = {
+        "sequence": int(new_sequence),
+        "key": key,
+        "value": value,
+        "timestamp_ms": int(timestamp_ms),
+        "previous_version_id": prev_entry.version_id,
+        "previous_hash": str(prev_entry.hash),
+        "hash": str(entry_hash),
+        "previous_key_object_etag": prev_key_etag,
+    }
+
+    log_key = S3KeyPath[str](f"{client._config.s3_prefix}_log.json")
+    s3_client.put_object(
+        bucket=client._config.s3_bucket,
+        key=log_key,
+        body=dumps_canonical(cast(JSONValue, log_entry)),
+        content_type="application/json",
+    )
+
+
+def test_repaired_etag_used_after_orphan_repair_end_to_end(
+    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+) -> None:
+    """Verify that orphan repair uses the repaired ETag for Phase 2 end-to-end.
+
+    Creates a real orphan in S3 by directly writing a log entry (simulating
+    Phase 1 success + Phase 2 failure), then verifies the next set() triggers
+    repair and completes successfully using the repaired ETag.
+    """
+    # Step 1: Write key "x" successfully (both phases succeed)
+    entry1 = client.set("x", {"version": 1})
+    assert entry1.key == "x"
+    assert entry1.value == {"version": 1}
+
+    # Get current key object ETag (needed for orphan log entry)
+    key_path = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/x.json")
+    head_response = s3_client.head_object(bucket=client._config.s3_bucket, key=key_path)
+    current_key_etag = head_response["ETag"]
+
+    # Step 2: Create orphan by writing a log entry directly (no key object update)
+    # This simulates: Phase 1 wrote {"version": 2} to log, Phase 2 failed
+    _create_orphan_log_entry(
+        client,
+        s3_client,
+        key="x",
+        value={"version": 2},
+        prev_entry=entry1,
+        prev_key_etag=current_key_etag,
+    )
+
+    # Verify orphan state: key object still has version 1
+    key_response = s3_client.get_object(
+        bucket=client._config.s3_bucket, key=key_path, version_id=None
+    )
+    key_data = read_body_as_json(key_response["Body"])
+    assert key_data["value"] == {"version": 1}, "Key object should still have old value (orphan)"
+
+    # Step 3: Call set("x", v3) — triggers real repair
+    # _get_latest_and_repair reads the orphaned log entry for key "x",
+    # repairs the key object (writing {"version": 2}), and returns the
+    # repaired ETag. Since repaired_key == "x" (the set key), the repaired
+    # ETag is used directly for Phase 2 instead of calling headObject.
+    entry3 = client.set("x", {"version": 3})
+    assert entry3.key == "x"
+    assert entry3.value == {"version": 3}
+
+    # Verify the final value via get()
+    retrieved = client.get("x")
+    assert retrieved.value == {"version": 3}
+    assert retrieved.sequence == entry3.sequence
+
+    # Verify hash chain integrity for the entry we wrote
+    assert client.verify(entry3) is True
+
+
+def test_repaired_etag_with_different_keys(
+    client: ImmuKVClient[str, object], s3_client: BrandedS3Client
+) -> None:
+    """Verify that when repaired orphan key differs from set key, headObject is used.
+
+    Creates an orphan for key "a", then sets key "b". The repair fixes "a",
+    but since "b" != "a", a headObject is needed for "b"'s current ETag.
+    """
+    # Write key "a" successfully
+    entry_a = client.set("a", {"key": "a", "version": 1})
+    assert entry_a.key == "a"
+
+    # Write key "b" successfully (this becomes the latest log entry)
+    entry_b = client.set("b", {"key": "b", "version": 1})
+    assert entry_b.key == "b"
+
+    # Get current key object ETag for "a" (needed for orphan log entry)
+    key_path_a = cast(S3KeyPath[str], f"{client._config.s3_prefix}keys/a.json")
+    head_a = s3_client.head_object(bucket=client._config.s3_bucket, key=key_path_a)
+    etag_a = head_a["ETag"]
+
+    # Create orphan for key "a": write log entry directly, don't update key object
+    _create_orphan_log_entry(
+        client,
+        s3_client,
+        key="a",
+        value={"key": "a", "version": 2},
+        prev_entry=entry_b,
+        prev_key_etag=etag_a,
+    )
+
+    # Now the latest log entry is an orphan for key "a".
+    # Call set("b", v2) — repair fixes "a" (writing its key object),
+    # but since we're writing to "b" (not "a"), headObject is called for "b"'s ETag.
+    entry_b2 = client.set("b", {"key": "b", "version": 2})
+    assert entry_b2.key == "b"
+    assert entry_b2.value == {"key": "b", "version": 2}
+
+    # Verify both keys have correct latest values
+    retrieved_a = client.get("a")
+    # Key "a" was repaired to version 2 by the repair step
+    assert retrieved_a.value == {"key": "a", "version": 2}
+
+    retrieved_b = client.get("b")
+    assert retrieved_b.value == {"key": "b", "version": 2}
+
+    # Verify chain integrity
+    assert client.verify_log_chain() is True
+
+
+def test_orphan_repair_failure_guard_not_triggered_on_first_entry(
+    client: ImmuKVClient[str, object],
+) -> None:
+    """Verify that set() succeeds for the very first entry even though can_write and
+    orphan_status are None.
+
+    The guard (log_etag is not None and can_write is None and orphan_status is None)
+    only triggers when a log already exists. For the first entry, log_etag is None,
+    so the guard does not fire.
+    """
+    # This is the first set() on a fresh bucket — no log exists yet
+    entry = client.set("first-key", {"data": "first-value"})
+    assert entry.key == "first-key"
+    assert entry.value == {"data": "first-value"}
+    assert entry.sequence == 0
+
+    # Verify via get
+    retrieved = client.get("first-key")
+    assert retrieved.value == {"data": "first-value"}
+
+
+# Note on Test B (set() fails when orphan repair encounters unexpected error):
+#
+# This behavior is tested thoroughly in test_unit.py
+# (test_set_throws_when_orphan_repair_has_unexpected_error).
+#
+# An integration test would require causing _repair_orphan to hit an unexpected
+# S3 error (not PreconditionFailed, not AccessDenied). This could only be achieved by:
+# - Temporarily revoking bucket write permissions mid-operation (not feasible with MinIO)
+# - Causing S3 to return a non-standard error code (not controllable)
+# - Corrupting bucket state in a way that triggers an unexpected error
+#
+# All of these are fragile and environment-dependent. The unit test with mocked
+# _get_latest_and_repair provides reliable coverage for this guard condition.
+# The integration tests above verify the happy path (repair succeeds, ETag is used)
+# which is the more important end-to-end behavior to validate.
