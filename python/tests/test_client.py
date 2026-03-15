@@ -8,8 +8,9 @@ import asyncio
 import concurrent.futures
 import os
 import uuid
+from collections.abc import Coroutine
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Generator, cast
+from typing import TYPE_CHECKING, Generator, TypeVar, cast
 
 import pytest
 
@@ -82,11 +83,14 @@ def raw_s3(_aio_loop: asyncio.AbstractEventLoop) -> Generator["S3Client", None, 
     future_close.result()
 
 
-def _run_sync(coro: object, loop: asyncio.AbstractEventLoop) -> dict[str, object]:
+_T = TypeVar("_T")
+
+
+def _run_sync(coro: Coroutine[object, object, _T], loop: asyncio.AbstractEventLoop) -> _T:
     """Run a coroutine on the background loop, blocking until complete."""
-    future: concurrent.futures.Future[dict[str, object]] = asyncio.run_coroutine_threadsafe(
+    future: concurrent.futures.Future[_T] = asyncio.run_coroutine_threadsafe(
         coro,
-        loop,  # type: ignore[arg-type]
+        loop,
     )
     return future.result()
 
@@ -1015,148 +1019,3 @@ def test_credential_provider_with_expires_at(s3_bucket: str) -> None:
 
         retrieved = c.get("expiry-key")
         assert retrieved.value == {"data": "expiry-value"}
-
-
-# --- Repaired ETag and orphan repair failure tests ---
-
-
-def test_repaired_etag_used_when_orphan_key_matches_set_key(
-    client: ImmuKVClient[str, object],
-) -> None:
-    """Test that headObject is skipped when repaired orphan key matches the set key."""
-    from unittest.mock import patch
-
-    # First, create an initial entry so the log exists
-    entry1 = client.set("target-key", {"data": "initial"})
-
-    # Mock _get_latest_and_repair to simulate: orphan for "target-key" was just repaired
-    repaired_etag = '"repaired-etag-123"'
-    mock_result = {
-        "log_etag": '"some-log-etag"',
-        "prev_version_id": entry1.version_id,
-        "prev_hash": entry1.hash,
-        "sequence": entry1.sequence,
-        "can_write": True,
-        "orphan_status": {
-            "is_orphaned": False,
-            "orphan_key": "target-key",
-            "orphan_entry": None,
-            "checked_at": 0,
-        },
-        "repaired_key": "target-key",
-        "repaired_key_object_etag": repaired_etag,
-    }
-
-    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
-        # Spy on s3.head_object to verify it is NOT called
-        with patch.object(client._s3, "head_object", wraps=client._s3.head_object) as head_spy:
-            entry2 = client.set("target-key", {"data": "updated"})
-
-            # head_object should NOT have been called because the repaired ETag was used
-            head_spy.assert_not_called()
-
-            # The set should succeed
-            assert entry2.key == "target-key"
-            assert entry2.value == {"data": "updated"}
-
-
-def test_headobject_fallback_when_orphan_key_differs_from_set_key(
-    client: ImmuKVClient[str, object],
-) -> None:
-    """Test that headObject IS called when repaired orphan key differs from set key."""
-    from unittest.mock import patch
-
-    # First, create initial entries so both keys exist
-    client.set("orphan-key", {"data": "orphan"})
-    entry1 = client.set("other-key", {"data": "initial"})
-
-    # Mock _get_latest_and_repair to simulate: orphan for "orphan-key" was repaired
-    # but we are setting "other-key"
-    repaired_etag = '"repaired-etag-456"'
-    mock_result = {
-        "log_etag": '"some-log-etag"',
-        "prev_version_id": entry1.version_id,
-        "prev_hash": entry1.hash,
-        "sequence": entry1.sequence,
-        "can_write": True,
-        "orphan_status": {
-            "is_orphaned": False,
-            "orphan_key": "orphan-key",
-            "orphan_entry": None,
-            "checked_at": 0,
-        },
-        "repaired_key": "orphan-key",
-        "repaired_key_object_etag": repaired_etag,
-    }
-
-    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
-        # Spy on s3.head_object to verify it IS called for the different key
-        with patch.object(client._s3, "head_object", wraps=client._s3.head_object) as head_spy:
-            entry2 = client.set("other-key", {"data": "updated"})
-
-            # head_object SHOULD have been called because the repaired key != set key
-            head_spy.assert_called()
-
-            # The set should succeed
-            assert entry2.key == "other-key"
-            assert entry2.value == {"data": "updated"}
-
-
-def test_set_throws_when_orphan_repair_has_unexpected_error(
-    client: ImmuKVClient[str, object],
-) -> None:
-    """Test that set() fails when orphan repair returns unexpected error."""
-    from unittest.mock import patch
-
-    # First, create an initial entry so the log exists (log_etag will be defined)
-    entry1 = client.set("some-key", {"data": "initial"})
-
-    # Mock _get_latest_and_repair to simulate: _repair_orphan returned (None, None, None)
-    # This means can_write=None, orphan_status=None, and log_etag is defined
-    mock_result = {
-        "log_etag": '"some-log-etag"',
-        "prev_version_id": entry1.version_id,
-        "prev_hash": entry1.hash,
-        "sequence": entry1.sequence,
-        "can_write": None,
-        "orphan_status": None,
-        "repaired_key": None,
-        "repaired_key_object_etag": None,
-    }
-
-    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
-        # set() should raise because orphan repair failed with unexpected error
-        with pytest.raises(
-            Exception,
-            match="Cannot proceed with set\\(\\): orphan repair failed with unexpected error",
-        ):
-            client.set("some-key", {"data": "new-value"})
-
-
-def test_set_does_not_throw_when_log_etag_is_none(
-    client: ImmuKVClient[str, object],
-) -> None:
-    """Test that set() succeeds when logEtag is None even if canWrite and orphanStatus are None."""
-    from unittest.mock import patch
-
-    from immukv._internal.types import hash_genesis, sequence_initial
-
-    # Mock _get_latest_and_repair to simulate: no log exists yet (first entry)
-    # can_write=None and orphan_status=None, but log_etag is also None
-    # This should NOT throw because there's no log to have an orphan
-    mock_result = {
-        "log_etag": None,
-        "prev_version_id": None,
-        "prev_hash": hash_genesis(),
-        "sequence": sequence_initial(),
-        "can_write": None,
-        "orphan_status": None,
-        "repaired_key": None,
-        "repaired_key_object_etag": None,
-    }
-
-    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
-        # Should succeed because log_etag is None (guard: log_etag is not None)
-        entry = client.set("first-key", {"data": "first-value"})
-        assert entry.key == "first-key"
-        assert entry.value == {"data": "first-value"}

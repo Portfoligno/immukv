@@ -696,6 +696,11 @@ describe('ImmuKVClient', () => {
   });
 
   describe('Repaired ETag and orphan repair failure', () => {
+    if (integrationTestEnabled) {
+      test.skip('Unit tests skipped during integration testing', () => {});
+      return;
+    }
+
     test('uses repaired ETag when orphan key matches set key (skips headObject)', async () => {
       // First, create an initial entry so the log exists
       const entry1 = await client.set('target-key', { data: 'initial' });

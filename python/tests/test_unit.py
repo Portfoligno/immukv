@@ -4,6 +4,8 @@ These tests verify pure logic: hash computation, data validation,
 type checking, and other functionality that doesn't need S3.
 """
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from immukv._internal.types import (
@@ -378,3 +380,204 @@ def test_credential_provider_session_injection() -> None:
         assert frozen.token == "INJECT_TOKEN"
 
     asyncio.run(run_test())
+
+
+# --- Repaired ETag and orphan repair failure tests ---
+#
+# These tests mock _get_latest_and_repair() and verify set() behaviour
+# around orphan repair, repaired ETags, and error handling.
+# They use a real ImmuKVClient with a fully mocked BrandedS3Client
+# so no S3/MinIO is needed.
+
+if TYPE_CHECKING:
+    from immukv import ImmuKVClient
+
+
+def _make_mock_client() -> "ImmuKVClient[str, object]":
+    """Create an ImmuKVClient with a fully mocked S3 backend for unit testing."""
+    from typing import cast
+    from unittest.mock import MagicMock
+
+    from immukv import Config, ImmuKVClient
+    from immukv._internal.s3_client import BrandedS3Client
+    from immukv._internal.s3_types import S3KeyPaths
+    from immukv.json_helpers import JSONValue
+
+    config = Config(
+        s3_bucket="unit-test-bucket",
+        s3_region="us-east-1",
+        s3_prefix="test/",
+    )
+
+    def identity_decoder(value: JSONValue) -> object:
+        return value
+
+    def identity_encoder(value: object) -> JSONValue:
+        return value  # type: ignore[return-value]
+
+    # Build the client by bypassing __init__ (which starts threads and connects to S3)
+    client: ImmuKVClient[str, object] = object.__new__(ImmuKVClient)
+    client._config = config
+    client._value_decoder = identity_decoder  # type: ignore[assignment]
+    client._value_encoder = identity_encoder  # type: ignore[assignment]
+    client._s3 = MagicMock(spec=BrandedS3Client)  # type: ignore[assignment]
+    client._log_key = S3KeyPaths.for_log(config.s3_prefix)  # type: ignore[assignment]
+    client._last_repair_check_ms = 0
+    client._can_write = None
+    client._latest_orphan_status = None
+    return client
+
+
+def test_repaired_etag_used_when_orphan_key_matches_set_key() -> None:
+    """Test that headObject is skipped when repaired orphan key matches the set key."""
+    from unittest.mock import patch
+
+    from immukv._internal.types import LatestLogState, hash_from_json, sequence_from_json
+
+    client = _make_mock_client()
+
+    repaired_etag = '"repaired-etag-123"'
+    mock_result: LatestLogState[str] = {
+        "log_etag": '"some-log-etag"',
+        "prev_version_id": "prev-version-1",  # type: ignore[typeddict-item]
+        "prev_hash": hash_from_json("sha256:" + "a" * 64),
+        "sequence": sequence_from_json(0),
+        "can_write": True,
+        "orphan_status": {
+            "is_orphaned": False,
+            "orphan_key": "target-key",
+            "orphan_entry": None,
+            "checked_at": 0,
+        },
+        "repaired_key": "target-key",
+        "repaired_key_object_etag": repaired_etag,  # type: ignore[typeddict-item]
+    }
+
+    # Mock put_object to return a valid response
+    client._s3.put_object.return_value = {  # type: ignore[attr-defined,misc]
+        "ETag": '"new-etag"',
+        "VersionId": "new-version-id",
+    }
+
+    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
+        entry = client.set("target-key", {"data": "updated"})
+
+        # head_object should NOT have been called because the repaired ETag was used
+        client._s3.head_object.assert_not_called()  # type: ignore[attr-defined]
+
+        # The set should succeed
+        assert entry.key == "target-key"
+        assert entry.value == {"data": "updated"}
+
+
+def test_headobject_fallback_when_orphan_key_differs_from_set_key() -> None:
+    """Test that headObject IS called when repaired orphan key differs from set key."""
+    from unittest.mock import patch
+
+    from immukv._internal.types import LatestLogState, hash_from_json, sequence_from_json
+
+    client = _make_mock_client()
+
+    repaired_etag = '"repaired-etag-456"'
+    mock_result: LatestLogState[str] = {
+        "log_etag": '"some-log-etag"',
+        "prev_version_id": "prev-version-1",  # type: ignore[typeddict-item]
+        "prev_hash": hash_from_json("sha256:" + "b" * 64),
+        "sequence": sequence_from_json(1),
+        "can_write": True,
+        "orphan_status": {
+            "is_orphaned": False,
+            "orphan_key": "orphan-key",
+            "orphan_entry": None,
+            "checked_at": 0,
+        },
+        "repaired_key": "orphan-key",
+        "repaired_key_object_etag": repaired_etag,  # type: ignore[typeddict-item]
+    }
+
+    # Mock head_object to return a valid response for the different key
+    client._s3.head_object.return_value = {  # type: ignore[attr-defined,misc]
+        "ETag": '"existing-key-etag"',
+        "VersionId": "existing-version-id",
+    }
+
+    # Mock put_object to return a valid response
+    client._s3.put_object.return_value = {  # type: ignore[attr-defined,misc]
+        "ETag": '"new-etag"',
+        "VersionId": "new-version-id",
+    }
+
+    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
+        entry = client.set("other-key", {"data": "updated"})
+
+        # head_object SHOULD have been called because the repaired key != set key
+        client._s3.head_object.assert_called()  # type: ignore[attr-defined]
+
+        # The set should succeed
+        assert entry.key == "other-key"
+        assert entry.value == {"data": "updated"}
+
+
+def test_set_throws_when_orphan_repair_has_unexpected_error() -> None:
+    """Test that set() fails when orphan repair returns unexpected error."""
+    from unittest.mock import patch
+
+    from immukv._internal.types import LatestLogState, hash_from_json, sequence_from_json
+
+    client = _make_mock_client()
+
+    # Mock _get_latest_and_repair to simulate: _repair_orphan returned (None, None, None)
+    # This means can_write=None, orphan_status=None, and log_etag is defined
+    mock_result: LatestLogState[str] = {
+        "log_etag": '"some-log-etag"',
+        "prev_version_id": "prev-version-1",  # type: ignore[typeddict-item]
+        "prev_hash": hash_from_json("sha256:" + "c" * 64),
+        "sequence": sequence_from_json(0),
+        "can_write": None,
+        "orphan_status": None,
+        "repaired_key": None,
+        "repaired_key_object_etag": None,
+    }
+
+    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
+        # set() should raise because orphan repair failed with unexpected error
+        with pytest.raises(
+            Exception,
+            match="Cannot proceed with set\\(\\): orphan repair failed with unexpected error",
+        ):
+            client.set("some-key", {"data": "new-value"})
+
+
+def test_set_does_not_throw_when_log_etag_is_none() -> None:
+    """Test that set() succeeds when logEtag is None even if canWrite and orphanStatus are None."""
+    from unittest.mock import patch
+
+    from immukv._internal.types import LatestLogState, hash_genesis, sequence_initial
+
+    client = _make_mock_client()
+
+    # Mock _get_latest_and_repair to simulate: no log exists yet (first entry)
+    # can_write=None and orphan_status=None, but log_etag is also None
+    # This should NOT throw because there's no log to have an orphan
+    mock_result: LatestLogState[str] = {
+        "log_etag": None,
+        "prev_version_id": None,  # type: ignore[typeddict-item]
+        "prev_hash": hash_genesis(),
+        "sequence": sequence_initial(),
+        "can_write": None,
+        "orphan_status": None,
+        "repaired_key": None,
+        "repaired_key_object_etag": None,
+    }
+
+    # Mock put_object to return a valid response
+    client._s3.put_object.return_value = {  # type: ignore[attr-defined,misc]
+        "ETag": '"first-etag"',
+        "VersionId": "first-version-id",
+    }
+
+    with patch.object(client, "_get_latest_and_repair", return_value=mock_result):
+        # Should succeed because log_etag is None (guard: log_etag is not None)
+        entry = client.set("first-key", {"data": "first-value"})
+        assert entry.key == "first-key"
+        assert entry.value == {"data": "first-value"}

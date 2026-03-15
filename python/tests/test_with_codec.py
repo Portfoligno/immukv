@@ -13,8 +13,9 @@ import asyncio
 import concurrent.futures
 import os
 import uuid
+from collections.abc import Coroutine
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Dict, Generator, TypedDict, cast
+from typing import TYPE_CHECKING, Dict, Generator, TypeVar, TypedDict, cast
 
 import pytest
 
@@ -153,10 +154,14 @@ def raw_s3(_aio_loop: asyncio.AbstractEventLoop) -> Generator["S3Client", None, 
     future_close.result()
 
 
-def _run_sync(coro: object, loop: asyncio.AbstractEventLoop) -> dict[str, object]:
+_T = TypeVar("_T")
+
+
+def _run_sync(coro: Coroutine[object, object, _T], loop: asyncio.AbstractEventLoop) -> _T:
     """Run a coroutine on the background loop, blocking until complete."""
-    future: concurrent.futures.Future[dict[str, object]] = asyncio.run_coroutine_threadsafe(
-        coro, loop  # type: ignore[arg-type]
+    future: concurrent.futures.Future[_T] = asyncio.run_coroutine_threadsafe(
+        coro,
+        loop,
     )
     return future.result()
 
