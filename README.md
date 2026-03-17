@@ -397,8 +397,8 @@ immukv/
 │   │   └── types.py             # Type definitions
 │   ├── stubs/
 │   │   └── wrapt/               # Type stubs for wrapt
-│   │       ├── __init__.pyi
-│   │       └── proxies.pyi
+│           ├── __init__.pyi
+│           └── proxies.pyi
 │   ├── tests/
 │   └── pyproject.toml
 ├── typescript/          # TypeScript package
