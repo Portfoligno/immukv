@@ -47,7 +47,7 @@ jobs:
     needs: prepare-checks
     if: ${{ needs.prepare-checks.outputs.active == 'true' && needs.prepare-checks.outputs.checks != '[]' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     strategy:
       matrix:
         check: ${{ fromJson(needs.prepare-checks.outputs.checks) }}
