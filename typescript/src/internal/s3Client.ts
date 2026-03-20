@@ -44,7 +44,7 @@ export function createBrowserSafeRequestHandler(): s3.S3ClientConfig['requestHan
     // @smithy/fetch-http-handler is a transitive dependency of @aws-sdk/client-s3
     // and is always available in browser builds.
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
       const { FetchHttpHandler } = require('@smithy/fetch-http-handler');
       return new FetchHttpHandler({ requestInit: { cache: 'no-cache' } });
     } catch {
