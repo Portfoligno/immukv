@@ -20,6 +20,42 @@ import {
 } from './s3Types';
 
 /**
+ * Returns a FetchHttpHandler configured with `cache: "no-cache"` when running
+ * in a browser environment, or undefined in Node.js (letting the SDK use its
+ * default NodeHttpHandler).
+ *
+ * Browser fetch() uses heuristic freshness caching (RFC 7234) by default,
+ * which can serve stale S3 responses during the retry loop in set().
+ * Setting `cache: "no-cache"` in RequestInit forces the browser to always
+ * revalidate with the server, while still allowing 304 Not Modified responses
+ * when the ETag matches (preserving bandwidth savings for unchanged data).
+ *
+ * This is a RequestInit property (not an HTTP header), so it has zero impact
+ * on SigV4 signing.
+ */
+export function createBrowserSafeRequestHandler(): s3.S3ClientConfig['requestHandler'] {
+  // Detect browser environment via typeof checks (safe even without DOM types)
+  const isBrowser =
+    typeof globalThis !== 'undefined' &&
+    typeof (globalThis as Record<string, unknown>)['document'] !== 'undefined';
+
+  if (isBrowser) {
+    // Dynamically require to avoid bundling issues in Node.js.
+    // @smithy/fetch-http-handler is a transitive dependency of @aws-sdk/client-s3
+    // and is always available in browser builds.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { FetchHttpHandler } = require('@smithy/fetch-http-handler');
+      return new FetchHttpHandler({ requestInit: { cache: 'no-cache' } });
+    } catch {
+      // If the import fails (e.g. in a non-standard bundler environment),
+      // fall through to undefined — the SDK will use its default handler.
+    }
+  }
+  return undefined;
+}
+
+/**
  * Branded S3 client wrapper returning nominally-typed responses.
  */
 export class BrandedS3Client {

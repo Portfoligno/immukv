@@ -14,7 +14,7 @@ import type {
 } from './types';
 import { KeyNotFoundError, ReadOnlyError } from './types';
 import type { JSONValue, ValueDecoder, ValueEncoder } from './jsonHelpers';
-import { BrandedS3Client } from './internal/s3Client';
+import { BrandedS3Client, createBrowserSafeRequestHandler } from './internal/s3Client';
 import { readBodyAsJson } from './internal/s3Helpers';
 import { stringifyCanonical } from './internal/jsonHelpers';
 import type { LogEntryForHash, OrphanStatus, RawLogEntry } from './internal/types';
@@ -62,6 +62,7 @@ export class ImmuKVClient<K extends string = string, V = any> {
         endpoint: config.overrides?.endpointUrl,
         credentials: config.overrides?.credentials,
         forcePathStyle: config.overrides?.forcePathStyle,
+        requestHandler: createBrowserSafeRequestHandler(),
       })
     );
     this.logKey = S3KeyPaths.forLog(config.s3Prefix);
