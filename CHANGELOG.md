@@ -5,6 +5,12 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.28] - 2026-03-20
+
+### Fixed
+
+- TypeScript: Browser HTTP cache causing stale `getObject` responses in the `set()` retry loop, exhausting all retries with 412 PreconditionFailed under concurrent writes
+
 ## [0.1.27] - 2026-03-16
 
 ### Fixed
