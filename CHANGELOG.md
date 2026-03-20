@@ -5,6 +5,12 @@ All notable changes to ImmuKV will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.29] - 2026-03-21
+
+### Fixed
+
+- TypeScript: Browser cache handler now correctly applies `cache: "no-cache"` to S3 fetch requests — the previous implementation silently failed due to `require()` not existing in browsers and `requestInit` as a plain object being ignored by the SDK
+
 ## [0.1.28] - 2026-03-20
 
 ### Fixed
@@ -360,6 +366,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only mode support
 - Optional KMS encryption support
 
+[0.1.29]: https://github.com/Portfoligno/immukv/releases/tag/0.1.29
+[0.1.28]: https://github.com/Portfoligno/immukv/releases/tag/0.1.28
 [0.1.27]: https://github.com/Portfoligno/immukv/releases/tag/0.1.27
 [0.1.26]: https://github.com/Portfoligno/immukv/releases/tag/0.1.26
 [0.1.25]: https://github.com/Portfoligno/immukv/releases/tag/0.1.25
