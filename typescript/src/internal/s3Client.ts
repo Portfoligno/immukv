@@ -20,7 +20,7 @@ import {
 } from './s3Types';
 
 /**
- * Returns a plain `FetchHttpHandlerOptions` object with `cache: "no-cache"`
+ * Returns a plain `FetchHttpHandlerOptions` object with `cache: "no-store"`
  * when running in a browser environment, or undefined in Node.js (letting the
  * SDK use its default NodeHttpHandler).
  *
@@ -31,9 +31,12 @@ import {
  *
  * Browser fetch() uses heuristic freshness caching (RFC 7234) by default,
  * which can serve stale S3 responses during the retry loop in set().
- * Setting `cache: "no-cache"` forces the browser to always revalidate with
- * the server, while still allowing 304 Not Modified responses when the ETag
- * matches (preserving bandwidth savings for unchanged data).
+ * `cache: "no-cache"` is insufficient because it still allows the browser to
+ * serve 304 revalidation responses on GET requests — during the retry loop,
+ * getObject may receive a stale ETag via a cached 304, causing every
+ * subsequent conditional PUT to fail with 412 until retries are exhausted.
+ * `cache: "no-store"` completely bypasses the browser cache (no storing, no
+ * revalidation), guaranteeing fresh reads on every retry.
  *
  * This is a RequestInit property (not an HTTP header), so it has zero impact
  * on SigV4 signing.
@@ -44,7 +47,7 @@ export function createBrowserSafeRequestHandler(): s3.S3ClientConfig['requestHan
     typeof (globalThis as Record<string, unknown>)['document'] !== 'undefined';
 
   if (isBrowser) {
-    return { cache: 'no-cache' };
+    return { cache: 'no-store' };
   }
   return undefined;
 }
