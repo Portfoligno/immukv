@@ -374,10 +374,10 @@ def test_credential_provider_session_injection() -> None:
 
         resolved = session._credentials  # type: ignore[attr-defined,misc]
         assert resolved is refreshable  # type: ignore[misc]
-        frozen = await refreshable.get_frozen_credentials()
-        assert frozen.access_key == "INJECT_AKID"
-        assert frozen.secret_key == "INJECT_SECRET"
-        assert frozen.token == "INJECT_TOKEN"
+        frozen = await refreshable.get_frozen_credentials()  # type: ignore[misc]
+        assert frozen.access_key == "INJECT_AKID"  # type: ignore[misc]
+        assert frozen.secret_key == "INJECT_SECRET"  # type: ignore[misc]
+        assert frozen.token == "INJECT_TOKEN"  # type: ignore[misc]
 
     asyncio.run(run_test())
 
