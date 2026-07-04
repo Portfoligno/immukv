@@ -379,7 +379,6 @@ immukv/
 │   │   ├── index.ts
 │   │   └── immukv.ts   # CDK construct implementation
 │   ├── test/
-│   ├── tsconfig.json
 │   ├── tsconfig.test.json
 │   └── package.json
 ├── python/              # Python package
