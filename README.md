@@ -379,6 +379,7 @@ immukv/
 │   │   ├── index.ts
 │   │   └── immukv.ts   # CDK construct implementation
 │   ├── test/
+│   ├── jest.config.js
 │   ├── tsconfig.test.json
 │   └── package.json
 ├── python/              # Python package
@@ -414,6 +415,7 @@ immukv/
 │   │   ├── jsonHelpers.ts       # JSON serialization helpers
 │   │   └── types.ts             # Type definitions
 │   ├── tests/
+│   ├── jest.config.js
 │   ├── tsconfig.json
 │   ├── tsconfig.test.json
 │   └── package.json
