@@ -18,8 +18,9 @@ export interface OidcProvider {
    * Email addresses allowed to assume the federated role.
    *
    * When provided, the trust policy adds a `StringEquals` condition on
-   * `${issuerUrl}:email` listing these addresses, restricting federation
-   * to the specified identities. Must be non-empty when provided.
+   * `<issuerHost>:email` (the protocol-stripped issuer URL, e.g.
+   * `accounts.google.com:email`) listing these addresses, restricting
+   * federation to the specified identities. Must be non-empty when provided.
    *
    * When omitted, the trust policy only checks `:aud` (client ID).
    */

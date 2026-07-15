@@ -206,7 +206,7 @@ store.prefix("app/").federatedRole; // IAM role for OIDC users
 
 #### Email-Based Access Control
 
-Use `allowedEmails` on an `OidcProvider` to restrict federation to specific email addresses. This adds a `StringEquals` condition on `${issuerUrl}:email` to the trust policy.
+Use `allowedEmails` on an `OidcProvider` to restrict federation to specific email addresses. This adds a `StringEquals` condition on `<issuerHost>:email` to the trust policy (the protocol is stripped from the issuer URL when forming the IAM condition key, so `https://accounts.google.com` becomes `accounts.google.com:email`).
 
 ```typescript
 const store = new ImmuKV(stack, "ImmuKV", {
@@ -280,7 +280,7 @@ Configuration for an OIDC identity provider:
 
 - `issuerUrl` (required): OIDC issuer URL (must start with `"https://"`).
 - `clientIds` (required): Client IDs (audiences) to trust from this provider. Must contain at least one element.
-- `allowedEmails` (optional): Email addresses allowed to assume the federated role. Adds a `StringEquals` condition on `${issuerUrl}:email` to the trust policy. Must be non-empty when provided. When omitted, the trust policy only checks `:aud` (client ID).
+- `allowedEmails` (optional): Email addresses allowed to assume the federated role. Adds a `StringEquals` condition on `<issuerHost>:email` to the trust policy (the protocol is stripped from the issuer URL when forming the IAM condition key, e.g. `accounts.google.com:email`). Must be non-empty when provided. When omitted, the trust policy only checks `:aud` (client ID).
 
 ### `ImmuKVProps`
 
