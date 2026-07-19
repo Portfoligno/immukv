@@ -173,7 +173,7 @@ config = Config(
     s3_bucket="bucket-name",
     s3_region="us-east-1",
     s3_prefix="",
-    kms_key_id=None,  # Optional KMS encryption
+    kms_key_id=None,  # Reserved for future use; not currently applied to S3 operations
     repair_check_interval_ms=300000,  # 5 minutes
     read_only=False,  # Set True to disable writes
     overrides=S3Overrides(
@@ -190,7 +190,7 @@ const config: Config = {
   s3Bucket: 'bucket-name',
   s3Region: 'us-east-1',
   s3Prefix: '',
-  // kmsKeyId: 'optional-key-id',
+  // kmsKeyId: 'optional-key-id',  // Reserved for future use; not currently applied to S3 operations
   repairCheckIntervalMs: 300000,  // 5 minutes
   readOnly: false,
   // overrides: {

@@ -56,7 +56,7 @@ export interface Config {
   s3Region: string;
   /** S3 key prefix (required, use empty string for no prefix) */
   s3Prefix: string;
-  /** Optional KMS key ID for encryption */
+  /** Optional KMS key ID for encryption (reserved for future use; not currently applied to S3 operations) */
   kmsKeyId?: string;
   /** Orphan repair check interval in milliseconds (default: 300000 = 5 minutes) */
   repairCheckIntervalMs?: number;
