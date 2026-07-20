@@ -296,9 +296,9 @@ Top-level properties for the `ImmuKV` construct:
 Configuration for a single ImmuKV prefix within the bucket:
 
 - `s3Prefix` (required): S3 key prefix for this namespace. Use `""` for bucket root, or directory-style like `"myapp/"` for namespacing.
-- `logVersionRetention` (optional): Duration to retain old log versions. Must be expressible in whole days.
+- `logVersionRetention` (optional): Duration to retain old log versions. Must be expressible in a positive whole number of days.
 - `logVersionsToRetain` (optional): Number of old log versions to retain.
-- `keyVersionRetention` (optional): Duration to retain old key object versions. Must be expressible in whole days.
+- `keyVersionRetention` (optional): Duration to retain old key object versions. Must be expressible in a positive whole number of days.
 - `keyVersionsToRetain` (optional): Number of old key versions to retain per key.
 - `onLogEntryCreated` (optional): S3 notification destination triggered when log entries are created under this prefix. Supports Lambda, SNS, and SQS.
 - `oidcProviders` (optional): Array of `OidcProvider` entries for web identity federation scoped to this prefix.

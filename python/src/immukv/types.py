@@ -96,7 +96,7 @@ class Config:
     s3_region: str
     s3_prefix: str
 
-    # Optional: encryption
+    # Optional: reserved for future use; not currently applied to S3 operations
     kms_key_id: Optional[str] = None
 
     # Optional: orphan repair policy
